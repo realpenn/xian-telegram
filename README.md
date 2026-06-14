@@ -5,10 +5,10 @@
 
 ## 当前状态
 
-🚧 **M2 养成闭环开发中**（分支 `feat/m1-foundation`）。完整设计见 **[spec.md](spec.md)**。
+🚧 **M3 群多人玩法开发中**（按 M1/M2/M3 stacked PR 拆分）。完整设计见 **[spec.md](spec.md)**。
 
-当前已实现个人养成主线：**注册测灵根 → 闭关攒修为 → 突破境界 → 历练 / 秘境 → 炼丹炼器 → 法宝功法配置**。
-后续模块（世界Boss / PvP / 宗门）会继续按 spec §16 推进。
+当前已实现 v1 主线：**注册测灵根 → 闭关攒修为 → 突破境界 → 历练 / 秘境 → 炼丹炼器 → 法宝功法配置 → 群内切磋 / 世界 Boss / 宗门**。
+后续会继续打磨数值、幂等 token、定时调度与真机体验。
 
 欢迎道友以 **Issue / Pull Request** 讨论。
 
@@ -21,8 +21,8 @@ cp .env.example .env          # 填入向 @BotFather 申请的 BOT_TOKEN
 python -m bot                 # 启动 bot（polling）
 ```
 
-在 Telegram 私聊里发送 `/start` 测灵根，再用 `/cultivate`、`/explore`、`/dungeon`、`/craft`、`/skills`、`/shop` 等指令游玩。
-开发自检：`pytest`（战斗 / 结算 / 突破 / 制造 / 秘境 / 经济核心逻辑单测）。
+在 Telegram 私聊里发送 `/start` 测灵根，再用 `/cultivate`、`/explore`、`/dungeon`、`/craft`、`/skills`、`/shop` 等指令养成；在群里使用 `/pvp`、`/rank`、`/boss`，用 `/sect` 处理宗门事务。
+开发自检：`pytest`（战斗 / 结算 / 突破 / 制造 / 秘境 / 经济 / PvP / Boss / 宗门核心逻辑单测）。
 
 ## v1 范围
 

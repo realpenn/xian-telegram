@@ -80,6 +80,57 @@ CREATE TABLE IF NOT EXISTS dungeon_runs (
     runs         INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, dungeon_key, day)
 );
+CREATE TABLE IF NOT EXISTS pvp_ratings (
+    user_id        INTEGER PRIMARY KEY,
+    rating         INTEGER NOT NULL DEFAULT 1000,
+    wins           INTEGER NOT NULL DEFAULT 0,
+    losses         INTEGER NOT NULL DEFAULT 0,
+    daily_count    INTEGER NOT NULL DEFAULT 0,
+    daily_reset_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS world_boss (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id       INTEGER NOT NULL,
+    boss_key      TEXT NOT NULL,
+    total_hp      INTEGER NOT NULL,
+    remaining_hp  INTEGER NOT NULL,
+    spawn_at      INTEGER NOT NULL,
+    expire_at     INTEGER NOT NULL,
+    status        TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS world_boss_damage (
+    boss_id  INTEGER NOT NULL,
+    user_id  INTEGER NOT NULL,
+    damage   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (boss_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS sects (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    name               TEXT NOT NULL UNIQUE,
+    level              INTEGER NOT NULL DEFAULT 1,
+    contribution_pool  INTEGER NOT NULL DEFAULT 0,
+    leader_user_id     INTEGER NOT NULL,
+    created_at         INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sect_members (
+    sect_id       INTEGER NOT NULL,
+    user_id       INTEGER NOT NULL,
+    role          TEXT NOT NULL,
+    contribution  INTEGER NOT NULL DEFAULT 0,
+    joined_at     INTEGER NOT NULL,
+    PRIMARY KEY (user_id)
+);
+CREATE TABLE IF NOT EXISTS sect_tasks (
+    user_id  INTEGER NOT NULL,
+    day      TEXT NOT NULL,
+    done     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
+);
+CREATE TABLE IF NOT EXISTS daily (
+    user_id          INTEGER PRIMARY KEY,
+    last_checkin_day TEXT,
+    streak           INTEGER NOT NULL DEFAULT 0
+);
 """
 
 

@@ -53,5 +53,14 @@ async def cmd_pvp(message: Message):
         opponent = message.reply_to_message.from_user
         opponent_id = opponent.id
         opponent_name = _name(opponent)
+    else:
+        parts = message.text.split(maxsplit=1)
+        if len(parts) == 2:
+            found = await pvp.opponent_from_arg(parts[1])
+            if found["status"] != "ok":
+                await message.answer("未寻得指定对手。可用 /pvp 随机匹配、回复某人 /pvp，或 /pvp @道号、/pvp #1。")
+                return
+            opponent_id = found["user_id"]
+            opponent_name = str(found["name"])
     res = await pvp.duel(message.from_user.id, opponent_id)
     await message.answer(_text(res, opponent_name))

@@ -132,6 +132,27 @@ async def test_pvp_random_opponent_prefers_rating_band(temp_db):
     assert await pvp.random_opponent(uid) == close_uid
 
 
+@pytest.mark.asyncio
+async def test_pvp_opponent_arg_supports_username_and_rank(temp_db):
+    attacker = 4017
+    named = 4018
+    ranked = 4019
+    await character.create(attacker, "attacker")
+    await character.create(named, "TargetDao")
+    await character.create(ranked, "ranker")
+    await db.execute(
+        "INSERT INTO pvp_ratings(user_id, rating, wins) VALUES(?, ?, ?), (?, ?, ?)",
+        (named, 1000, 0, ranked, 1500, 3))
+
+    by_name = await pvp.opponent_from_arg("@targetdao")
+    by_rank = await pvp.opponent_from_arg("#1")
+
+    assert by_name["status"] == "ok"
+    assert by_name["user_id"] == named
+    assert by_rank["status"] == "ok"
+    assert by_rank["user_id"] == ranked
+
+
 class _FakeRng:
     def random(self):
         return 1.0

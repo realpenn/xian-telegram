@@ -63,6 +63,41 @@ async def random_opponent(user_id: int):
     return random.choice(eligible)["user_id"] if eligible else None
 
 
+async def opponent_from_arg(arg: str):
+    arg = (arg or "").strip()
+    if not arg:
+        return {"status": "empty"}
+    if arg.startswith("@"):
+        username = arg[1:].strip().lower()
+        if not username:
+            return {"status": "not_found"}
+        row = await db.fetchone(
+            "SELECT tg_user_id, username FROM users WHERE lower(username)=?",
+            (username,))
+        if not row:
+            return {"status": "not_found"}
+        return {"status": "ok", "user_id": row["tg_user_id"],
+                "name": "@" + (row["username"] or str(row["tg_user_id"]))}
+    if arg.startswith("#") and arg[1:].isdigit():
+        rank = int(arg[1:])
+        if rank <= 0:
+            return {"status": "not_found"}
+        rows = await top(rank)
+        if len(rows) < rank:
+            return {"status": "not_found"}
+        row = rows[rank - 1]
+        return {"status": "ok", "user_id": row["user_id"],
+                "name": row["username"] or f"榜第{rank}"}
+    if arg.isdigit():
+        row = await db.fetchone(
+            "SELECT tg_user_id, username FROM users WHERE tg_user_id=?",
+            (int(arg),))
+        if row:
+            return {"status": "ok", "user_id": row["tg_user_id"],
+                    "name": row["username"] or row["tg_user_id"]}
+    return {"status": "not_found"}
+
+
 async def _combatant(user_id: int, name: str) -> Combatant:
     char = await character.get(user_id)
     st = await character.stats(char)

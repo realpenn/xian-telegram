@@ -21,7 +21,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     tg_user_id  INTEGER PRIMARY KEY,
     username    TEXT,
-    created_at  INTEGER NOT NULL
+    created_at  INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS characters (
     user_id       INTEGER PRIMARY KEY,
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS characters (
     weapon_key    TEXT NOT NULL DEFAULT '新手剑',
     alchemy_prof  INTEGER NOT NULL DEFAULT 0,
     forge_prof    INTEGER NOT NULL DEFAULT 0,
+    debuff_json   TEXT NOT NULL DEFAULT '{}',
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -83,6 +85,7 @@ CREATE TABLE IF NOT EXISTS dungeon_runs (
 CREATE TABLE IF NOT EXISTS pvp_ratings (
     user_id        INTEGER PRIMARY KEY,
     rating         INTEGER NOT NULL DEFAULT 1000,
+    reputation     INTEGER NOT NULL DEFAULT 0,
     wins           INTEGER NOT NULL DEFAULT 0,
     losses         INTEGER NOT NULL DEFAULT 0,
     daily_count    INTEGER NOT NULL DEFAULT 0,
@@ -96,6 +99,7 @@ CREATE TABLE IF NOT EXISTS world_boss (
     remaining_hp  INTEGER NOT NULL,
     spawn_at      INTEGER NOT NULL,
     expire_at     INTEGER NOT NULL,
+    message_id    INTEGER,
     status        TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS world_boss_damage (
@@ -131,6 +135,18 @@ CREATE TABLE IF NOT EXISTS daily (
     last_checkin_day TEXT,
     streak           INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS bot_chats (
+    chat_id       INTEGER PRIMARY KEY,
+    title         TEXT,
+    last_seen_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS callback_tokens (
+    token        TEXT PRIMARY KEY,
+    user_id      INTEGER,
+    action       TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    consumed_at  INTEGER
+);
 """
 
 
@@ -145,8 +161,12 @@ async def init_db(path: str = None):
     _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
+    await _ensure_column(_conn, "users", "last_seen_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")
+    await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
+    await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _conn.commit()
 
 

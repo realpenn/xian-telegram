@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
-                             main_menu, menu_with_breakthrough, show)
+                             action_callback_data, consume_action_callback, main_menu,
+                             menu_with_breakthrough, show)
 from services import breakthrough, character, cultivation
 
 router = Router()
@@ -24,11 +25,28 @@ async def do_cultivate(user_id: int):
                  f"修为 {res['cultivation']}/{res['cost']}"]
         if res["can_advance"]:
             lines.append("✨ 修为已足，可尝试突破！")
-        return "\n".join(lines), menu_with_breakthrough(res["can_advance"])
+        return "\n".join(lines), await menu_with_breakthrough(user_id, res["can_advance"])
     await cultivation.start(user_id)
     text = ("🧘 道友盘膝而坐，敛息凝神，开始闭关参悟……\n"
             "（修为随时间累积，离线上限 12 时辰。再用一次 /cultivate 或点「闭关」即出关收功。）")
     return text, main_menu()
+
+
+async def render_cultivate(user_id: int):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    if char.seclusion_at:
+        text = "🧘 道友正在闭关。若要收功出关，请点下方按钮。"
+        button = "出关收功"
+    else:
+        text = "🧘 洞府清净，可入定闭关，离线积攒修为。"
+        button = "开始闭关"
+    rows = [[InlineKeyboardButton(
+        text=button,
+        callback_data=await action_callback_data(user_id, "cult:toggle"))]]
+    rows += main_menu().inline_keyboard
+    return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _bt_text(res: dict) -> str:
@@ -46,12 +64,17 @@ def _bt_text(res: dict) -> str:
     if s == "small_success":
         return f"📈 水到渠成，道友晋入 {res['label']}！"
     if s == "big_success":
+        tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         if res["tribulation"]:
-            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！"
+            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{tail}"
         return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！"
     if s == "big_fail":
         head = "⚡ 天劫凶猛" if res["tribulation"] else "✗ 冲关受阻"
-        return f"{head}，道友未能破境，道基微损（修为 −{res['loss']}），所幸未曾跌境。来日再战。"
+        tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        return (
+            f"{head}，道友未能破境，道基不稳（修为 −{res['loss']}，"
+            f"法身六维暂降），所幸未曾跌境。来日再战。{tail}"
+        )
     return "天机紊乱，突破未果。"
 
 
@@ -67,14 +90,27 @@ async def cmd_cultivate(message: Message):
 async def cb_cultivate(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
+    text, markup = await render_cultivate(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("cult:toggle:"))
+async def cb_cultivate_toggle(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    if await consume_action_callback(callback) != "cult:toggle":
+        return
     text, markup = await do_cultivate(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()
 
 
-@router.callback_query(F.data == "bt:do")
+@router.callback_query(F.data.startswith("bt:do:"))
 async def cb_breakthrough(callback: CallbackQuery):
     if await guard_private_callback(callback):
+        return
+    if await consume_action_callback(callback) != "bt:do":
         return
     res = await breakthrough.try_advance(callback.from_user.id)
     await show(callback, _bt_text(res), main_menu())

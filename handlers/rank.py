@@ -21,5 +21,5 @@ async def cmd_rank(message: Message):
         name = row["username"] or str(row["user_id"])
         lines.append(
             f"{idx}. {name} · {pvp.tier(row['rating'])} {row['rating']} 分 "
-            f"({row['wins']}胜/{row['losses']}负)")
+            f"· 声望 {row['reputation']} ({row['wins']}胜/{row['losses']}负)")
     await message.answer("\n".join(lines))

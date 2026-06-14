@@ -21,10 +21,10 @@ def _combatant(src) -> Combatant:
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
 
 
-def _roll_drops(d, rng) -> dict:
+def _roll_drops(d, rng, drop_bonus: float = 0.0) -> dict:
     drops = {}
     for key, weight, qmin, qmax in d["drops"]:
-        if rng.random() < weight / 100.0:
+        if rng.random() < min(100.0, weight * (1 + drop_bonus)) / 100.0:
             drops[key] = drops.get(key, 0) + rng.randint(qmin, qmax)
     return drops
 
@@ -41,8 +41,8 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
             return {"status": "missing"}
         if row["realm"] < d["realm"]:
             return {"status": "locked", "need": R.realm_label(d["realm"], 0)}
-        stamina, stamina_at = settle.regen_stamina(
-            row["stamina"], row["stamina_at"], R.STAMINA_CAP[row["realm"]], now)
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(row, now, welfare)
         if row["seclusion_at"]:
             await conn.execute(
                 "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
@@ -72,8 +72,10 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     rng = random.Random(f"{user_id}:{dungeon_key}:{now}")
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                       **mods)
     logs = []
     cleared = 0
     for layer in range(1, d["layers"] + 1):
@@ -89,7 +91,8 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     stack_drops = {}
     equipment_drops = []
     if cleared:
-        raw_drops = _roll_drops(d, rng)
+        welfare = await character.sect_welfare(user_id)
+        raw_drops = _roll_drops(d, rng, welfare["drop_pct"])
         for key, qty in raw_drops.items():
             if ITEMS.get(key, {}).get("type") == "equipment":
                 for _ in range(qty):

@@ -4,7 +4,8 @@ from __future__ import annotations
 import time
 
 from config.items import item_name
-from config.sects import CREATE_REALM, CREATE_STONE_COST, SECT_SHOP, TASK_CONTRIBUTION, TASK_STONE_REWARD
+from config.sects import (CREATE_REALM, CREATE_STONE_COST, SECT_SHOP, TASK_CONTRIBUTION,
+                          TASK_STONE_REWARD, upgrade_cost)
 from models import db
 
 
@@ -150,6 +151,28 @@ async def redeem(user_id: int, item_key: str) -> dict:
             (user_id, item_key, good["qty"], good["qty"]))
         return {"status": "ok", "item": item_name(item_key), "qty": good["qty"],
                 "cost": good["contribution"]}
+
+
+async def upgrade(user_id: int) -> dict:
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT s.id, s.name, s.level, s.contribution_pool, m.role "
+            "FROM sect_members m JOIN sects s ON s.id=m.sect_id WHERE m.user_id=?",
+            (user_id,))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return {"status": "not_member"}
+        if row["role"] != "宗主":
+            return {"status": "no_permission"}
+        cost = upgrade_cost(row["level"])
+        if row["contribution_pool"] < cost:
+            return {"status": "no_pool", "need": cost, "have": row["contribution_pool"]}
+        await conn.execute(
+            "UPDATE sects SET level=level+1, contribution_pool=contribution_pool-? WHERE id=?",
+            (cost, row["id"]))
+        return {"status": "upgraded", "name": row["name"], "level": row["level"] + 1,
+                "cost": cost}
 
 
 async def members(sect_id: int, limit: int = 10):

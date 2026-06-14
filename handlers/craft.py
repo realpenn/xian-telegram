@@ -8,8 +8,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import item_name
-from config.recipes import RECIPES, recipes_for_realm
-from handlers.common import NEED_START, guard_private_callback, guard_private_message, main_menu, show
+from config.recipes import RECIPES
+from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
+                             guard_private_callback, guard_private_message, main_menu, show)
 from services import character, crafting
 
 router = Router()
@@ -30,14 +31,16 @@ async def render_craft(user_id: int):
         recipe = RECIPES[active["recipe_key"]]
         remain = max(0, active["finish_at"] - int(time.time()))
         lines.append(f"炉中：{recipe['name']}，尚需 {remain} 秒。")
-        rows.append([InlineKeyboardButton(text="🪙 灵石加速", callback_data="craft:fast")])
+        rows.append([InlineKeyboardButton(
+            text="🪙 灵石加速",
+            callback_data=await action_callback_data(user_id, "craft:fast"))])
     else:
         lines.append("选择一张丹方或图纸下炉：")
-        for key, recipe in recipes_for_realm(char.realm):
+        for key, recipe in await crafting.available_recipes(user_id):
             mats = "、".join(f"{item_name(k)}×{v}" for k, v in recipe["materials"].items())
             rows.append([InlineKeyboardButton(
                 text=f"{recipe['name']}（{mats} / 🪙{recipe['stone']}）",
-                callback_data=f"craft:start:{key}")])
+                callback_data=await action_callback_data(user_id, f"craft:start:{key}"))])
     rows += main_menu().inline_keyboard
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -50,6 +53,8 @@ def _result_text(res: dict) -> str:
         return "炉中已有造化，且待出炉。"
     if s == "locked":
         return "炼丹炼器需筑基后方可稳控炉火。"
+    if s == "need_recipe":
+        return "尚未研读对应丹方/图纸。"
     if s == "in_seclusion":
         return "道友闭关中，不宜分神开炉。"
     if s == "no_stone":
@@ -85,14 +90,19 @@ async def cb_craft(callback: CallbackQuery):
 async def cb_craft_start(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
-    res = await crafting.start_job(callback.from_user.id, callback.data.split(":", 2)[2])
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("craft:start:"):
+        return
+    res = await crafting.start_job(callback.from_user.id, action.split(":", 2)[2])
     await show(callback, _result_text(res), main_menu())
     await callback.answer()
 
 
-@router.callback_query(F.data == "craft:fast")
+@router.callback_query(F.data.startswith("craft:fast:"))
 async def cb_craft_fast(callback: CallbackQuery):
     if await guard_private_callback(callback):
+        return
+    if await consume_action_callback(callback) != "craft:fast":
         return
     res = await crafting.accelerate(callback.from_user.id)
     await show(callback, _result_text(res), main_menu())

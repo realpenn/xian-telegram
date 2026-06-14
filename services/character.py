@@ -8,12 +8,16 @@ from dataclasses import dataclass
 
 from config import realms as R
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
-from config.skills import SKILLS, STARTER_SKILL
+from config.sects import welfare as sect_welfare_config
+from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTER_SKILL,
+                           is_mind_skill, skill_bonus)
 from models import db
 from services import settle
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
+ROOT_BONE_MIN = 40
+ROOT_BONE_MAX = 80
 
 
 @dataclass
@@ -29,6 +33,7 @@ class Character:
     seclusion_at: int   # 0 表示未闭关
     spirit_stone: int
     weapon_key: str
+    debuff_json: dict
 
 
 async def _select_character(conn, user_id: int):
@@ -38,9 +43,26 @@ async def _select_character(conn, user_id: int):
     return row
 
 
-def _settled_stamina(row, now: int = None):
+async def _sect_welfare(conn, user_id: int) -> dict:
+    cur = await conn.execute(
+        "SELECT s.level FROM sect_members m JOIN sects s ON s.id=m.sect_id WHERE m.user_id=?",
+        (user_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    return sect_welfare_config(row["level"]) if row else sect_welfare_config(0)
+
+
+async def sect_welfare(user_id: int) -> dict:
+    row = await db.fetchone(
+        "SELECT s.level FROM sect_members m JOIN sects s ON s.id=m.sect_id WHERE m.user_id=?",
+        (user_id,))
+    return sect_welfare_config(row["level"]) if row else sect_welfare_config(0)
+
+
+def _settled_stamina(row, now: int = None, welfare: dict = None):
     now = int(time.time()) if now is None else now
-    cap = R.STAMINA_CAP[row["realm"]]
+    welfare = welfare or sect_welfare_config(0)
+    cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
     return settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)
 
 
@@ -51,22 +73,59 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
         stamina=row["stamina"] if stamina is None else stamina,
         stamina_at=row["stamina_at"] if stamina_at is None else stamina_at,
         seclusion_at=row["seclusion_at"] or 0,
-        spirit_stone=row["spirit_stone"], weapon_key=row["weapon_key"])
+        spirit_stone=row["spirit_stone"], weapon_key=row["weapon_key"],
+        debuff_json=json.loads(row["debuff_json"] or "{}"))
+
+
+COMBAT_MOD_KEYS = ("lifesteal_pct", "reflect_pct", "crit_resist", "pierce", "initiative")
+
+
+def active_temporary_buffs(state: dict, now: int = None) -> list:
+    now = int(time.time()) if now is None else now
+    buffs = state.get("buffs") or {}
+    active = []
+    for buff in buffs.values():
+        if int(buff.get("until", 0)) > now:
+            active.append(buff)
+    return active
+
+
+def temporary_seclusion_pct(state: dict, now: int = None) -> float:
+    pct = 0.0
+    for buff in active_temporary_buffs(state, now):
+        effects = buff.get("effects") or {}
+        pct += float(effects.get("seclusion_pct", 0))
+    return pct
 
 
 async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
 
+async def touch_user(user_id: int, username: str, now: int = None):
+    now = int(time.time()) if now is None else now
+    await db.execute(
+        "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
+        (username, now, user_id))
+
+
+def roll_root_bone(rng=random) -> int:
+    return max(ROOT_BONE_MIN, min(ROOT_BONE_MAX, int(round(rng.gauss(60, 9)))))
+
+
 async def create(user_id: int, username: str) -> Character:
     now = int(time.time())
-    root = random.randint(40, 80)
+    root = roll_root_bone(random)
     spirit = random.choice(SPIRIT_ROOTS)
     cap = R.STAMINA_CAP[0]
     async with db.transaction() as conn:
         await conn.execute(
-            "INSERT OR IGNORE INTO users(tg_user_id, username, created_at) VALUES(?,?,?)",
-            (user_id, username, now))
+            "INSERT OR IGNORE INTO users(tg_user_id, username, created_at, last_seen_at) "
+            "VALUES(?,?,?,?)",
+            (user_id, username, now, now))
+        await conn.execute(
+            "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
+            (username, now, user_id))
         # OR IGNORE：并发双 /start 时不抛 IntegrityError，已存在则保留原存档。
         await conn.execute(
             "INSERT OR IGNORE INTO characters(user_id, root_bone, spirit_root, realm, stage, "
@@ -76,6 +135,9 @@ async def create(user_id: int, username: str) -> Character:
         await conn.execute(
             "INSERT OR IGNORE INTO character_skills(user_id, skill_key, slot) VALUES(?,?,0)",
             (user_id, STARTER_SKILL))
+        await conn.execute(
+            "INSERT OR IGNORE INTO character_skills(user_id, skill_key, slot) VALUES(?,?,?)",
+            (user_id, STARTER_MIND, MIND_SLOT))
     return await get(user_id)
 
 
@@ -83,8 +145,9 @@ async def get(user_id: int):
     row = await db.fetchone("SELECT * FROM characters WHERE user_id=?", (user_id,))
     if not row:
         return None
-    cap = R.STAMINA_CAP[row["realm"]]
     now = int(time.time())
+    welfare = await sect_welfare(user_id)
+    cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
     new_stam, new_at = settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)
     if new_stam != row["stamina"] or new_at != row["stamina_at"]:
         await db.execute("UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
@@ -96,13 +159,59 @@ async def stats(char: Character) -> dict:
     base = R.base_stats(char.realm, char.stage)
     equipped = await equipped_items(char.user_id)
     if equipped:
+        has_weapon = False
         for inst in equipped:
-            for k, v in equipment_bonus(inst).items():
+            has_weapon = has_weapon or equipment_slot(inst["base_key"]) == "weapon"
+            _apply_equipment_bonus(base, equipment_bonus(inst))
+        if not has_weapon:
+            for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
     else:
         for k, v in weapon_bonus(char.weapon_key).items():
             base[k] = base.get(k, 0) + v
+    mind = await get_mind_skill(char.user_id)
+    if mind:
+        for key, val in skill_bonus(mind).items():
+            if key.endswith("_pct"):
+                stat_key = key[:-4]
+                base[stat_key] = int(base.get(stat_key, 0) * (1 + val))
+            else:
+                base[key] = base.get(key, 0) + val
+    _apply_temporary_stat_buffs(base, char.debuff_json)
+    welfare = await sect_welfare(char.user_id)
+    if welfare["stat_pct"]:
+        for key in R.STAT_KEYS:
+            base[key] = int(base[key] * (1 + welfare["stat_pct"]))
+    unstable_until = int(char.debuff_json.get("unstable_until", 0))
+    if unstable_until > int(time.time()):
+        for key in R.STAT_KEYS:
+            base[key] = max(1, int(base[key] * 0.9))
     return base
+
+
+def _apply_equipment_bonus(base: dict, bonus: dict):
+    deferred = []
+    for key, val in bonus.items():
+        if key in COMBAT_MOD_KEYS:
+            continue
+        if key.endswith("_pct"):
+            stat_key = key[:-4]
+            deferred.append((stat_key, float(val)))
+        else:
+            base[key] = base.get(key, 0) + val
+    for stat_key, pct in deferred:
+        base[stat_key] = int(base.get(stat_key, 0) * (1 + pct))
+
+
+def _apply_temporary_stat_buffs(base: dict, state: dict):
+    for buff in active_temporary_buffs(state):
+        for key, val in (buff.get("effects") or {}).items():
+            if key.endswith("_pct"):
+                stat_key = key[:-4]
+                if stat_key in R.STAT_KEYS:
+                    base[stat_key] = int(base.get(stat_key, 0) * (1 + float(val)))
+            elif key in R.STAT_KEYS:
+                base[key] = base.get(key, 0) + int(val)
 
 
 def equipment_bonus(inst: dict) -> dict:
@@ -114,10 +223,27 @@ def equipment_bonus(inst: dict) -> dict:
     return bonus
 
 
+async def combat_mods(user_id: int) -> dict:
+    mods = {key: 0 for key in COMBAT_MOD_KEYS}
+    for inst in await equipped_items(user_id):
+        for key, val in (inst.get("affixes") or {}).items():
+            if key in mods:
+                mods[key] += val
+    return mods
+
+
 async def get_skills(user_id: int):
     rows = await db.fetchall(
-        "SELECT skill_key FROM character_skills WHERE user_id=? ORDER BY slot", (user_id,))
+        "SELECT skill_key FROM character_skills WHERE user_id=? AND slot>=0 ORDER BY slot",
+        (user_id,))
     return [r["skill_key"] for r in rows]
+
+
+async def get_mind_skill(user_id: int):
+    row = await db.fetchone(
+        "SELECT skill_key FROM character_skills WHERE user_id=? AND slot=?",
+        (user_id, MIND_SLOT))
+    return row["skill_key"] if row else None
 
 
 async def knows_skill(user_id: int, skill_key: str) -> bool:
@@ -198,7 +324,8 @@ async def reserve_stamina_for_action(user_id: int, amount: int) -> dict:
         if not row:
             return {"status": "missing"}
         now = int(time.time())
-        stamina, stamina_at = _settled_stamina(row, now)
+        welfare = await _sect_welfare(conn, user_id)
+        stamina, stamina_at = _settled_stamina(row, now, welfare)
         if row["seclusion_at"]:
             if stamina != row["stamina"] or stamina_at != row["stamina_at"]:
                 await conn.execute(
@@ -240,6 +367,7 @@ async def create_item_instance(user_id: int, base_key: str, tier: str = None, af
 
 async def equip_instance(user_id: int, instance_id: int) -> dict:
     async with db.transaction() as conn:
+        await _normalize_accessory_slots(conn, user_id)
         cur = await conn.execute(
             "SELECT * FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))
         inst = await cur.fetchone()
@@ -249,13 +377,48 @@ async def equip_instance(user_id: int, instance_id: int) -> dict:
         slot = equipment_slot(inst["base_key"])
         if not slot:
             return {"status": "not_equipment"}
+        target_slot = slot
+        if slot == "accessory":
+            cur = await conn.execute(
+                "SELECT equipped_slot FROM item_instances "
+                "WHERE user_id=? AND equipped_slot IN ('accessory:1','accessory:2')",
+                (user_id,))
+            used = {row["equipped_slot"] for row in await cur.fetchall()}
+            await cur.close()
+            target_slot = next((s for s in ("accessory:1", "accessory:2") if s not in used),
+                               "accessory:1")
         await conn.execute(
             "UPDATE item_instances SET equipped_slot=NULL WHERE user_id=? AND equipped_slot=?",
-            (user_id, slot))
+            (user_id, target_slot))
         await conn.execute(
             "UPDATE item_instances SET equipped_slot=? WHERE id=? AND user_id=?",
-            (slot, instance_id, user_id))
-        return {"status": "ok", "slot": slot, "name": item_name(inst["base_key"])}
+            (target_slot, instance_id, user_id))
+        return {"status": "ok", "slot": target_slot, "name": item_name(inst["base_key"])}
+
+
+async def _normalize_accessory_slots(conn, user_id: int):
+    cur = await conn.execute(
+        "SELECT id, equipped_slot FROM item_instances "
+        "WHERE user_id=? AND equipped_slot IN ('accessory','accessory:1','accessory:2') "
+        "ORDER BY id",
+        (user_id,))
+    rows = await cur.fetchall()
+    await cur.close()
+    used = set()
+    updates = []
+    for row in rows:
+        current = row["equipped_slot"]
+        if current in ("accessory:1", "accessory:2") and current not in used:
+            target = current
+        else:
+            target = next((slot for slot in ("accessory:1", "accessory:2")
+                           if slot not in used), None)
+        if target:
+            used.add(target)
+        if target != current:
+            updates.append((target, row["id"]))
+    for target, item_id in updates:
+        await conn.execute("UPDATE item_instances SET equipped_slot=? WHERE id=?", (target, item_id))
 
 
 async def learn_skill_from_pages(user_id: int, page_key: str) -> dict:
@@ -271,26 +434,45 @@ async def learn_skill_from_pages(user_id: int, page_key: str) -> dict:
         await cur.close()
         if not inv or inv["qty"] < need:
             return {"status": "need_pages", "need": need, "have": inv["qty"] if inv else 0}
-        cur = await conn.execute(
-            "SELECT 1 FROM character_skills WHERE user_id=? AND skill_key=?",
-            (user_id, skill_key))
-        exists = await cur.fetchone()
-        await cur.close()
-        if exists:
-            return {"status": "known", "skill": skill_key}
-        cur = await conn.execute(
-            "SELECT slot FROM character_skills WHERE user_id=? ORDER BY slot", (user_id,))
-        used = {row["slot"] for row in await cur.fetchall()}
-        await cur.close()
-        slot = next((i for i in range(3) if i not in used), 2)
-        if slot in used:
+        if is_mind_skill(skill_key):
+            slot = MIND_SLOT
+            cur = await conn.execute(
+                "SELECT skill_key FROM character_skills WHERE user_id=? AND slot=?",
+                (user_id, MIND_SLOT))
+            current = await cur.fetchone()
+            await cur.close()
+            if current and current["skill_key"] == skill_key:
+                return {"status": "known", "skill": skill_key}
             await conn.execute(
                 "UPDATE character_skills SET skill_key=? WHERE user_id=? AND slot=?",
-                (skill_key, user_id, slot))
+                (skill_key, user_id, MIND_SLOT))
+            if not current:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO character_skills(user_id, skill_key, slot) "
+                    "VALUES(?,?,?)",
+                    (user_id, skill_key, MIND_SLOT))
         else:
-            await conn.execute(
-                "INSERT INTO character_skills(user_id, skill_key, slot) VALUES(?,?,?)",
-                (user_id, skill_key, slot))
+            cur = await conn.execute(
+                "SELECT 1 FROM character_skills WHERE user_id=? AND skill_key=?",
+                (user_id, skill_key))
+            exists = await cur.fetchone()
+            await cur.close()
+            if exists:
+                return {"status": "known", "skill": skill_key}
+            cur = await conn.execute(
+                "SELECT slot FROM character_skills WHERE user_id=? AND slot>=0 ORDER BY slot",
+                (user_id,))
+            used = {row["slot"] for row in await cur.fetchall()}
+            await cur.close()
+            slot = next((i for i in COMBAT_SLOTS if i not in used), 2)
+            if slot in used:
+                await conn.execute(
+                    "UPDATE character_skills SET skill_key=? WHERE user_id=? AND slot=?",
+                    (skill_key, user_id, slot))
+            else:
+                await conn.execute(
+                    "INSERT INTO character_skills(user_id, skill_key, slot) VALUES(?,?,?)",
+                    (user_id, skill_key, slot))
         await conn.execute(
             "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
             (need, user_id, page_key))
@@ -322,7 +504,8 @@ async def start_seclusion(user_id: int, now: int = None) -> dict:
             return {"status": "missing"}
         if row["seclusion_at"]:
             return {"status": "already"}
-        stamina, stamina_at = _settled_stamina(row, now)
+        welfare = await _sect_welfare(conn, user_id)
+        stamina, stamina_at = _settled_stamina(row, now, welfare)
         await conn.execute(
             "UPDATE characters SET stamina=?, stamina_at=?, seclusion_at=? WHERE user_id=?",
             (stamina, stamina_at, now, user_id))
@@ -337,8 +520,15 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             return {"status": "missing"}
         if not row["seclusion_at"]:
             return {"status": "not_in"}
-        stamina, stamina_at = _settled_stamina(row, now)
-        gained = settle.seclusion_gain(row["realm"], row["seclusion_at"], now, row["root_bone"])
+        welfare = await _sect_welfare(conn, user_id)
+        stamina, stamina_at = _settled_stamina(row, now, welfare)
+        gained = settle.seclusion_gain(
+            row["realm"], row["seclusion_at"], now, row["root_bone"],
+            place_factor=(
+                (1 + welfare["seclusion_pct"])
+                * (1 + temporary_seclusion_pct(json.loads(row["debuff_json"] or "{}"), now))
+            ),
+            offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
         new_cult = row["cultivation"] + gained
         await conn.execute(
             "UPDATE characters SET cultivation=?, stamina=?, stamina_at=?, seclusion_at=NULL "

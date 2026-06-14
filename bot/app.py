@@ -6,11 +6,13 @@ import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 
 from handlers import (bag, boss, craft, cultivate, daily, dungeon, explore,
                       help as help_h, me, pvp, rank, sect, shop, skills, start)
 from models import db
+from services import world_boss
 
 _COMMANDS = [
     BotCommand(command="start", description="踏入仙途 / 测灵根"),
@@ -44,6 +46,9 @@ async def main():
     await db.init_db()
 
     bot = Bot(token=token)
+    scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+    scheduler.add_job(world_boss.scheduled_spawn, "cron", hour=20, minute=0, args=[bot])
+    scheduler.start()
     dp = Dispatcher()
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,
                    pvp, rank, boss, sect, daily, help_h):
@@ -54,5 +59,6 @@ async def main():
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown(wait=False)
         await bot.session.close()
         await db.close_db()

@@ -20,6 +20,25 @@ def _boss_combatant(key: str) -> Combatant:
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
 
 
+async def remember_chat(chat_id: int, title: str = None, now: int = None):
+    now = int(time.time()) if now is None else now
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET title=?, last_seen_at=?",
+        (chat_id, title, now, title, now))
+
+
+async def known_chats():
+    rows = await db.fetchall("SELECT chat_id, title FROM bot_chats ORDER BY last_seen_at DESC")
+    return [dict(row) for row in rows]
+
+
+async def remember_message(boss_id: int, message_id: int):
+    await db.execute(
+        "UPDATE world_boss SET message_id=? WHERE id=?",
+        (message_id, boss_id))
+
+
 async def _active_row(conn, chat_id: int, now: int):
     cur = await conn.execute(
         "SELECT * FROM world_boss WHERE chat_id=? AND status='alive' ORDER BY id DESC LIMIT 1",
@@ -28,6 +47,7 @@ async def _active_row(conn, chat_id: int, now: int):
     await cur.close()
     if row and row["expire_at"] <= now:
         await conn.execute("UPDATE world_boss SET status='expired' WHERE id=?", (row["id"],))
+        await _distribute(conn, row["id"], WORLD_BOSSES[row["boss_key"]])
         return None
     return row
 
@@ -63,6 +83,39 @@ async def ensure_active(chat_id: int, now: int = None):
         created = await cur.fetchone()
         await cur.close()
         return created
+
+
+def broadcast_text(boss_row) -> str:
+    cfg = WORLD_BOSSES[boss_row["boss_key"]]
+    return (
+        f"🐲 世界 Boss「{cfg['name']}」现世！\n"
+        f"气血 {boss_row['remaining_hp']}/{boss_row['total_hp']}，持续 2 小时。\n"
+        "发送 /boss 或点击挑战合力诛妖。"
+    )
+
+
+async def scheduled_spawn(bot, now: int = None):
+    spawned = []
+    for chat in await known_chats():
+        boss = await ensure_active(chat["chat_id"], now)
+        if boss["status"] != "alive":
+            continue
+        text = broadcast_text(boss)
+        try:
+            if boss["message_id"]:
+                await bot.edit_message_text(
+                    text=text, chat_id=chat["chat_id"], message_id=boss["message_id"])
+            else:
+                msg = await bot.send_message(chat["chat_id"], text)
+                await remember_message(boss["id"], msg.message_id)
+        except Exception:
+            try:
+                msg = await bot.send_message(chat["chat_id"], text)
+                await remember_message(boss["id"], msg.message_id)
+            except Exception:
+                pass
+        spawned.append(dict(boss))
+    return spawned
 
 
 async def status(chat_id: int, now: int = None):
@@ -105,8 +158,10 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     char = reserve["char"]
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                       **mods)
     target = _boss_combatant(boss["boss_key"])
     result = simulate(player, target, seed=hash((chat_id, user_id, now)) & 0xFFFFFFFF)
     damage = max(1, target.max_hp - result["d_hp"])
@@ -133,7 +188,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
 
     return {"status": "ok", "damage": damage, "remaining_hp": remaining,
             "total_hp": boss["total_hp"], "boss_name": cfg["name"], "defeated": defeated,
-            "leaderboard": leaderboard, "rewards": rewards,
+            "leaderboard": leaderboard, "rewards": rewards, "boss_id": boss["id"],
             "stamina_left": reserve["stamina_left"]}
 
 

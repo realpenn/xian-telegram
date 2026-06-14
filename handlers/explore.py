@@ -10,7 +10,7 @@ from config import realms as R
 from config.items import item_name
 from config.maps import maps_for_realm
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
-                             main_menu, show)
+                             action_callback_data, consume_action_callback, main_menu, show)
 from services import character
 from services import explore as explore_service
 
@@ -21,18 +21,23 @@ async def render_menu(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
-    cap = R.STAMINA_CAP[char.realm]
-    rows = [[InlineKeyboardButton(text=f"{m['name']}（精力{m['stamina']}）",
-                                  callback_data=f"ex:{key}")]
-            for key, m in maps_for_realm(char.realm)]
+    welfare = await character.sect_welfare(user_id)
+    cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
+    rows = []
+    for key, m in maps_for_realm(char.realm):
+        rows.append([InlineKeyboardButton(
+            text=f"{m['name']}（精力{m['stamina']}）",
+            callback_data=await action_callback_data(user_id, f"ex:{key}"))])
     rows += main_menu().inline_keyboard
     text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n择一处历练之地，斩妖夺宝："
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def _after_markup(map_key: str) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="🔁 再历练一次", callback_data=f"ex:{map_key}"),
-             InlineKeyboardButton(text="⚔️ 换地图", callback_data="nav:explore")]]
+async def _after_markup(user_id: int, map_key: str) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text="🔁 再历练一次",
+        callback_data=await action_callback_data(user_id, f"ex:{map_key}")),
+        InlineKeyboardButton(text="⚔️ 换地图", callback_data="nav:explore")]]
     rows += main_menu().inline_keyboard
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -88,8 +93,11 @@ async def cb_explore_menu(callback: CallbackQuery):
 async def cb_explore_go(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
-    map_key = callback.data[3:]
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("ex:"):
+        return
+    map_key = action[3:]
     res = await explore_service.explore(callback.from_user.id, map_key)
-    markup = _after_markup(map_key) if res["status"] == "ok" else main_menu()
+    markup = await _after_markup(callback.from_user.id, map_key) if res["status"] == "ok" else main_menu()
     await show(callback, _result_text(res), markup)
     await callback.answer()

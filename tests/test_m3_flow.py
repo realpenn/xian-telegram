@@ -31,6 +31,7 @@ async def test_pvp_duel_updates_ratings_and_reward(temp_db):
     rows = await pvp.top()
     assert {row["user_id"] for row in rows} == {a, b}
     assert any(row["rating"] != 1000 for row in rows)
+    assert sum(row["reputation"] for row in rows) == pvp.WIN_REPUTATION + pvp.LOSS_REPUTATION
     assert (await character.get(a)).spirit_stone >= 105
 
 

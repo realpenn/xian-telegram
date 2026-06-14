@@ -30,6 +30,11 @@ class Combatant:
     skills: list            # 战技 key 列表（按优先级）；普攻为隐式兜底
     max_hp: int = 0
     max_mp: int = 0
+    lifesteal_pct: float = 0.0
+    reflect_pct: float = 0.0
+    crit_resist: int = 0
+    pierce: int = 0
+    initiative: int = 0
     cooldowns: dict = field(default_factory=dict)
     dots: list = field(default_factory=list)   # [[剩余回合, 每回合伤害], ...]
     shield: bool = False
@@ -41,8 +46,10 @@ class Combatant:
 
 
 def _hit(att, dfn, coef, rng):
-    raw = att.atk * coef * (1 - dfn.df / (dfn.df + DEF_K))
-    crit_rate = min(CRIT_CAP, att.crit / (att.crit + CRIT_K))
+    effective_df = max(0, dfn.df - att.pierce)
+    raw = att.atk * coef * (1 - effective_df / (effective_df + DEF_K))
+    effective_crit = max(0, att.crit - dfn.crit_resist)
+    crit_rate = min(CRIT_CAP, effective_crit / (effective_crit + CRIT_K))
     is_crit = rng.random() < crit_rate
     dmg = raw * (CRIT_MULT if is_crit else 1.0) * (0.9 + rng.random() * 0.2)
     return max(1, int(dmg)), is_crit
@@ -80,6 +87,7 @@ def _act(actor, target, rng, log):
         else:
             target.hp -= dmg
             log.append(f"{actor.name} 施「{sk['name']}」{'（暴击）' if crit else ''}，伤 {dmg}。")
+            _after_direct_damage(actor, target, dmg, log)
     elif t == "dot":
         dmg, _ = _hit(actor, target, sk["coef"], rng)
         target.dots.append([sk["dur"], dmg])
@@ -94,6 +102,19 @@ def _act(actor, target, rng, log):
     elif t == "stun":
         target.stunned = True
         log.append(f"{actor.name} 祭「{sk['name']}」，定住 {target.name}！")
+
+
+def _after_direct_damage(actor, target, dmg, log):
+    if actor.lifesteal_pct > 0:
+        healed = min(actor.max_hp - actor.hp, int(dmg * actor.lifesteal_pct))
+        if healed > 0:
+            actor.hp += healed
+            log.append(f"🩸 {actor.name} 汲取气血 {healed}。")
+    if target.reflect_pct > 0 and actor.hp > 0:
+        reflected = int(dmg * target.reflect_pct)
+        if reflected > 0:
+            actor.hp -= reflected
+            log.append(f"↩️ {target.name} 反震 {reflected}。")
 
 
 def _tick_dots(c, log):
@@ -131,7 +152,7 @@ def _decide(a, d):
 def simulate(a: Combatant, d: Combatant, seed: int = 0) -> dict:
     rng = random.Random(seed)
     log = [f"⚔️ {a.name} 对阵 {d.name}！"]
-    order = (a, d) if a.spd >= d.spd else (d, a)
+    order = (a, d) if (a.spd + a.initiative) >= (d.spd + d.initiative) else (d, a)
     rnd = 0
     for rnd in range(1, MAX_ROUNDS + 1):
         for c in (a, d):

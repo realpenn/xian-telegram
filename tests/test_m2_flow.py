@@ -52,6 +52,57 @@ async def test_forge_equipment_can_be_equipped_and_changes_stats(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_equipment_affixes_apply_percent_stats_and_combat_mods(temp_db):
+    uid = 2016
+    await character.create(uid, "tester")
+    before = await character.stats(await character.get(uid))
+    await character.create_item_instance(
+        uid, "聚灵佩",
+        affixes={"atk_pct": 0.1, "lifesteal_pct": 0.2, "pierce": 9})
+    inst = (await character.item_instances(uid))[0]
+
+    assert (await character.equip_instance(uid, inst["id"]))["status"] == "ok"
+    after = await character.stats(await character.get(uid))
+    mods = await character.combat_mods(uid)
+
+    assert after["atk"] > before["atk"]
+    assert mods["lifesteal_pct"] == 0.2
+    assert mods["pierce"] == 9
+
+
+@pytest.mark.asyncio
+async def test_two_accessories_can_be_equipped(temp_db):
+    uid = 2012
+    await character.create(uid, "tester")
+    await character.create_item_instance(uid, "聚灵佩")
+    await character.create_item_instance(uid, "聚灵佩")
+
+    items = await character.item_instances(uid)
+    assert (await character.equip_instance(uid, items[0]["id"]))["slot"] == "accessory:1"
+    assert (await character.equip_instance(uid, items[1]["id"]))["slot"] == "accessory:2"
+
+    equipped_slots = {inst["equipped_slot"] for inst in await character.equipped_items(uid)}
+    assert {"accessory:1", "accessory:2"} <= equipped_slots
+
+
+@pytest.mark.asyncio
+async def test_legacy_accessory_slot_is_normalized(temp_db):
+    uid = 2013
+    await character.create(uid, "tester")
+    await character.create_item_instance(uid, "聚灵佩")
+    await character.create_item_instance(uid, "聚灵佩")
+    items = await character.item_instances(uid)
+    await db.execute("UPDATE item_instances SET equipped_slot='accessory' WHERE id=?",
+                     (items[0]["id"],))
+
+    res = await character.equip_instance(uid, items[1]["id"])
+    equipped_slots = {inst["equipped_slot"] for inst in await character.equipped_items(uid)}
+
+    assert res["slot"] == "accessory:2"
+    assert {"accessory:1", "accessory:2"} <= equipped_slots
+
+
+@pytest.mark.asyncio
 async def test_shop_buy_and_sell_stack_items(temp_db):
     uid = 2003
     await character.create(uid, "tester")
@@ -89,3 +140,22 @@ async def test_learn_skill_from_pages(temp_db):
     assert res["status"] == "ok"
     assert "烈火诀" in await character.get_skills(uid)
     assert await character.item_qty(uid, "烈火诀残页") == 0
+
+
+@pytest.mark.asyncio
+async def test_mind_skill_uses_passive_slot_and_changes_stats(temp_db):
+    uid = 2015
+    await character.create(uid, "tester")
+
+    assert await character.get_mind_skill(uid) == "吐纳诀"
+    assert "吐纳诀" not in await character.get_skills(uid)
+
+    before = await character.stats(await character.get(uid))
+    await character.add_item(uid, "归元心法残页", 3)
+    res = await character.learn_skill_from_pages(uid, "归元心法残页")
+    after = await character.stats(await character.get(uid))
+
+    assert res["status"] == "ok"
+    assert await character.get_mind_skill(uid) == "归元心法"
+    assert "归元心法" not in await character.get_skills(uid)
+    assert after["hp"] > before["hp"]

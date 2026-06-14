@@ -20,6 +20,9 @@ async def render_shop(user_id: int):
         return NEED_START, None
     rows = []
     lines = ["🪙 NPC 商店", f"灵石：{char.spirit_stone}", "可购："]
+    rows.append([InlineKeyboardButton(
+        text="购买精力（🪙80 / ⚡20）",
+        callback_data=await action_callback_data(user_id, "shop:stamina"))])
     for key, good in goods_for_realm(char.realm):
         lines.append(f"- {item_name(key)}：{good['price']} 灵石")
         rows.append([InlineKeyboardButton(
@@ -44,6 +47,10 @@ def _result_text(res: dict) -> str:
         return f"购得 {res['item']}×{res['qty']}，耗灵石 {res['cost']}。"
     if s == "ok":
         return f"回收 {res['item']}×{res['qty']}，得灵石 {res['gain']}。"
+    if s == "stamina_ok":
+        return f"耗灵石 {res['cost']}，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。"
+    if s == "stamina_full":
+        return "精力已满，暂不必购买。"
     if s == "no_stone":
         return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
     if s == "no_item":
@@ -92,5 +99,16 @@ async def cb_sell(callback: CallbackQuery):
     if not action or not action.startswith("shop:sell:"):
         return
     res = await shop.sell(callback.from_user.id, action.split(":", 2)[2])
+    await show(callback, _result_text(res), main_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("shop:stamina:"))
+async def cb_buy_stamina(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    if await consume_action_callback(callback) != "shop:stamina":
+        return
+    res = await shop.buy_stamina(callback.from_user.id)
     await show(callback, _result_text(res), main_menu())
     await callback.answer()

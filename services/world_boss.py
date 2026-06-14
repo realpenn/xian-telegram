@@ -33,6 +33,12 @@ async def known_chats():
     return [dict(row) for row in rows]
 
 
+async def remember_message(boss_id: int, message_id: int):
+    await db.execute(
+        "UPDATE world_boss SET message_id=? WHERE id=?",
+        (message_id, boss_id))
+
+
 async def _active_row(conn, chat_id: int, now: int):
     cur = await conn.execute(
         "SELECT * FROM world_boss WHERE chat_id=? AND status='alive' ORDER BY id DESC LIMIT 1",
@@ -94,10 +100,20 @@ async def scheduled_spawn(bot, now: int = None):
         boss = await ensure_active(chat["chat_id"], now)
         if boss["status"] != "alive":
             continue
+        text = broadcast_text(boss)
         try:
-            await bot.send_message(chat["chat_id"], broadcast_text(boss))
+            if boss["message_id"]:
+                await bot.edit_message_text(
+                    text=text, chat_id=chat["chat_id"], message_id=boss["message_id"])
+            else:
+                msg = await bot.send_message(chat["chat_id"], text)
+                await remember_message(boss["id"], msg.message_id)
         except Exception:
-            pass
+            try:
+                msg = await bot.send_message(chat["chat_id"], text)
+                await remember_message(boss["id"], msg.message_id)
+            except Exception:
+                pass
         spawned.append(dict(boss))
     return spawned
 
@@ -170,7 +186,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
 
     return {"status": "ok", "damage": damage, "remaining_hp": remaining,
             "total_hp": boss["total_hp"], "boss_name": cfg["name"], "defeated": defeated,
-            "leaderboard": leaderboard, "rewards": rewards,
+            "leaderboard": leaderboard, "rewards": rewards, "boss_id": boss["id"],
             "stamina_left": reserve["stamina_left"]}
 
 

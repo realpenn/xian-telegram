@@ -75,13 +75,26 @@ async def cmd_boss(message: Message):
     await world_boss.remember_chat(message.chat.id, message.chat.title)
     await world_boss.ensure_active(message.chat.id)
     res = await world_boss.status(message.chat.id)
-    await message.answer(_status_text(res), reply_markup=await _markup())
+    markup = await _markup()
+    if res["status"] != "none" and res["boss"].get("message_id"):
+        try:
+            await message.bot.edit_message_text(
+                text=_status_text(res), chat_id=message.chat.id, message_id=res["boss"]["message_id"],
+                reply_markup=markup)
+            return
+        except Exception:
+            pass
+    sent = await message.answer(_status_text(res), reply_markup=markup)
+    if res["status"] != "none":
+        await world_boss.remember_message(res["boss"]["id"], sent.message_id)
 
 
 @router.callback_query(F.data == "boss:status")
 async def cb_boss_status(callback: CallbackQuery):
     res = await world_boss.status(callback.message.chat.id)
     await show(callback, _status_text(res), await _markup())
+    if res["status"] != "none":
+        await world_boss.remember_message(res["boss"]["id"], callback.message.message_id)
     await callback.answer()
 
 
@@ -91,4 +104,6 @@ async def cb_boss_hit(callback: CallbackQuery):
         return
     res = await world_boss.challenge(callback.message.chat.id, callback.from_user.id)
     await show(callback, _challenge_text(res), await _markup())
+    if res["status"] == "ok":
+        await world_boss.remember_message(res["boss_id"], callback.message.message_id)
     await callback.answer()

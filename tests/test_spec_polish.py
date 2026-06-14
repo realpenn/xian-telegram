@@ -4,7 +4,7 @@ import pytest_asyncio
 from config import realms as R
 from handlers.common import action_callback_data, consume_action_callback
 from models import db
-from services import breakthrough, character, crafting, explore, items, pvp, sect, world_boss
+from services import breakthrough, character, crafting, explore, items, pvp, sect, shop, world_boss
 
 
 @pytest_asyncio.fixture
@@ -159,20 +159,32 @@ async def test_explore_can_run_three_encounters(temp_db):
 
 @pytest.mark.asyncio
 async def test_world_boss_scheduled_spawn_uses_known_chats(temp_db):
+    class SentMessage:
+        def __init__(self, message_id):
+            self.message_id = message_id
+
     class FakeBot:
         def __init__(self):
             self.sent = []
+            self.edited = []
 
         async def send_message(self, chat_id, text):
             self.sent.append((chat_id, text))
+            return SentMessage(len(self.sent))
+
+        async def edit_message_text(self, text, chat_id, message_id):
+            self.edited.append((chat_id, message_id, text))
 
     await world_boss.remember_chat(-4005, "试炼群", now=1000)
     bot = FakeBot()
 
     spawned = await world_boss.scheduled_spawn(bot, now=1000)
+    await world_boss.scheduled_spawn(bot, now=1001)
 
     assert spawned
     assert bot.sent and bot.sent[0][0] == -4005
+    assert len(bot.sent) == 1
+    assert bot.edited and bot.edited[0][0] == -4005
 
 
 @pytest.mark.asyncio
@@ -218,6 +230,23 @@ async def test_consumables_restore_clear_debuff_and_raise_root(temp_db):
     assert after.stamina > 0
     assert after.debuff_json == {}
     assert after.root_bone == before.root_bone + 1
+
+
+@pytest.mark.asyncio
+async def test_spirit_stones_can_buy_stamina(temp_db):
+    uid = 4015
+    await character.create(uid, "tester")
+    await db.execute(
+        "UPDATE characters SET stamina=0, stamina_at=?, spirit_stone=? WHERE user_id=?",
+        (1000, 100, uid))
+
+    res = await shop.buy_stamina(uid, now=1000)
+    row = await db.fetchone("SELECT stamina, spirit_stone FROM characters WHERE user_id=?", (uid,))
+
+    assert res["status"] == "stamina_ok"
+    assert res["gain"] == shop.STAMINA_STONE_GAIN
+    assert row["stamina"] == shop.STAMINA_STONE_GAIN
+    assert row["spirit_stone"] == 100 - shop.STAMINA_STONE_COST
 
 
 @pytest.mark.asyncio

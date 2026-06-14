@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from config.items import item_name, sell_price
 from config.shop import SHOP_ITEMS
+from config import realms as R
 from models import db
+
+STAMINA_STONE_COST = 80
+STAMINA_STONE_GAIN = 20
 
 
 async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
@@ -50,3 +54,28 @@ async def sell(user_id: int, item_key: str, qty: int = 1) -> dict:
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (gain, user_id))
         return {"status": "ok", "item": item_name(item_key), "qty": qty, "gain": gain}
+
+
+async def buy_stamina(user_id: int, now: int = None) -> dict:
+    async with db.transaction() as conn:
+        row = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
+        char = await row.fetchone()
+        await row.close()
+        if not char:
+            return {"status": "missing"}
+        from services import character
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(char, now, welfare)
+        cap = R.STAMINA_CAP[char["realm"]] + welfare["stamina_bonus"]
+        if stamina >= cap:
+            return {"status": "stamina_full", "cap": cap}
+        if char["spirit_stone"] < STAMINA_STONE_COST:
+            return {"status": "no_stone", "need": STAMINA_STONE_COST,
+                    "have": char["spirit_stone"]}
+        gained = min(STAMINA_STONE_GAIN, cap - stamina)
+        await conn.execute(
+            "UPDATE characters SET spirit_stone=spirit_stone-?, stamina=?, stamina_at=? "
+            "WHERE user_id=?",
+            (STAMINA_STONE_COST, stamina + gained, stamina_at, user_id))
+        return {"status": "stamina_ok", "cost": STAMINA_STONE_COST,
+                "gain": gained, "stamina": stamina + gained, "cap": cap}

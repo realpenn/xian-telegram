@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS world_boss (
     remaining_hp  INTEGER NOT NULL,
     spawn_at      INTEGER NOT NULL,
     expire_at     INTEGER NOT NULL,
+    message_id    INTEGER,
     status        TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS world_boss_damage (
@@ -161,6 +162,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")
+    await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _conn.commit()
 
 

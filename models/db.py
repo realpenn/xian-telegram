@@ -35,6 +35,8 @@ CREATE TABLE IF NOT EXISTS characters (
     seclusion_at  INTEGER,
     spirit_stone  INTEGER NOT NULL DEFAULT 0,
     weapon_key    TEXT NOT NULL DEFAULT '新手剑',
+    alchemy_prof  INTEGER NOT NULL DEFAULT 0,
+    forge_prof    INTEGER NOT NULL DEFAULT 0,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -48,6 +50,35 @@ CREATE TABLE IF NOT EXISTS character_skills (
     skill_key  TEXT NOT NULL,
     slot       INTEGER NOT NULL,
     PRIMARY KEY (user_id, slot)
+);
+CREATE TABLE IF NOT EXISTS item_instances (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL,
+    base_key       TEXT NOT NULL,
+    tier           TEXT NOT NULL,
+    affixes_json   TEXT NOT NULL DEFAULT '{}',
+    equipped_slot  TEXT
+);
+CREATE TABLE IF NOT EXISTS recipes_known (
+    user_id     INTEGER NOT NULL,
+    recipe_key  TEXT NOT NULL,
+    PRIMARY KEY (user_id, recipe_key)
+);
+CREATE TABLE IF NOT EXISTS crafting_jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    craft_type  TEXT NOT NULL,
+    recipe_key  TEXT NOT NULL,
+    start_at    INTEGER NOT NULL,
+    finish_at   INTEGER NOT NULL,
+    status      TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS dungeon_runs (
+    user_id      INTEGER NOT NULL,
+    dungeon_key  TEXT NOT NULL,
+    day          TEXT NOT NULL,
+    runs         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, dungeon_key, day)
 );
 """
 
@@ -63,6 +94,8 @@ async def init_db(path: str = None):
     _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
+    await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
     await _conn.commit()
 
 
@@ -82,6 +115,14 @@ def _c():
 def _lock():
     assert _write_lock is not None, "DB 未初始化，请先 await init_db()"
     return _write_lock
+
+
+async def _ensure_column(conn, table: str, column: str, definition: str):
+    cur = await conn.execute(f"PRAGMA table_info({table})")
+    columns = {row[1] for row in await cur.fetchall()}
+    await cur.close()
+    if column not in columns:
+        await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 async def fetchone(sql, params=()):

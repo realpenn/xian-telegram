@@ -32,6 +32,10 @@ def main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📈 道行", callback_data="nav:me"),
          InlineKeyboardButton(text="🧘 闭关", callback_data="nav:cultivate")],
         [InlineKeyboardButton(text="⚔️ 历练", callback_data="nav:explore"),
+         InlineKeyboardButton(text="🏯 秘境", callback_data="nav:dungeon")],
+        [InlineKeyboardButton(text="💊 炼制", callback_data="nav:craft"),
+         InlineKeyboardButton(text="📖 功法", callback_data="nav:skills")],
+        [InlineKeyboardButton(text="🪙 商店", callback_data="nav:shop"),
          InlineKeyboardButton(text="🎒 储物袋", callback_data="nav:bag")],
         [InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
     ])

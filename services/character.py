@@ -1,13 +1,14 @@
 """角色服务：注册/读取/属性计算/储物袋。读取时惰性恢复精力并落库。"""
 from __future__ import annotations
 
+import json
 import random
 import time
 from dataclasses import dataclass
 
 from config import realms as R
-from config.items import weapon_bonus
-from config.skills import STARTER_SKILL
+from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
+from config.skills import SKILLS, STARTER_SKILL
 from models import db
 from services import settle
 
@@ -93,9 +94,24 @@ async def get(user_id: int):
 
 async def stats(char: Character) -> dict:
     base = R.base_stats(char.realm, char.stage)
-    for k, v in weapon_bonus(char.weapon_key).items():
-        base[k] = base.get(k, 0) + v
+    equipped = await equipped_items(char.user_id)
+    if equipped:
+        for inst in equipped:
+            for k, v in equipment_bonus(inst).items():
+                base[k] = base.get(k, 0) + v
+    else:
+        for k, v in weapon_bonus(char.weapon_key).items():
+            base[k] = base.get(k, 0) + v
     return base
+
+
+def equipment_bonus(inst: dict) -> dict:
+    item = ITEMS.get(inst["base_key"], {})
+    bonus = dict(item.get("bonus", {}))
+    affixes = inst.get("affixes") or {}
+    for key, val in affixes.items():
+        bonus[key] = bonus.get(key, 0) + val
+    return bonus
 
 
 async def get_skills(user_id: int):
@@ -104,11 +120,40 @@ async def get_skills(user_id: int):
     return [r["skill_key"] for r in rows]
 
 
+async def knows_skill(user_id: int, skill_key: str) -> bool:
+    row = await db.fetchone(
+        "SELECT 1 FROM character_skills WHERE user_id=? AND skill_key=?",
+        (user_id, skill_key))
+    return row is not None
+
+
 async def inventory(user_id: int):
     rows = await db.fetchall(
         "SELECT item_key, qty FROM inventory WHERE user_id=? AND qty>0 ORDER BY item_key",
         (user_id,))
     return [(r["item_key"], r["qty"]) for r in rows]
+
+
+async def item_instances(user_id: int):
+    rows = await db.fetchall(
+        "SELECT * FROM item_instances WHERE user_id=? ORDER BY equipped_slot DESC, id",
+        (user_id,))
+    return [_instance_from_row(row) for row in rows]
+
+
+async def equipped_items(user_id: int):
+    rows = await db.fetchall(
+        "SELECT * FROM item_instances WHERE user_id=? AND equipped_slot IS NOT NULL ORDER BY id",
+        (user_id,))
+    return [_instance_from_row(row) for row in rows]
+
+
+def _instance_from_row(row) -> dict:
+    return {
+        "id": row["id"], "user_id": row["user_id"], "base_key": row["base_key"],
+        "tier": row["tier"], "equipped_slot": row["equipped_slot"],
+        "affixes": json.loads(row["affixes_json"] or "{}"),
+    }
 
 
 async def item_qty(user_id: int, key: str) -> int:
@@ -128,6 +173,17 @@ async def add_stone(user_id: int, amount: int):
     await db.execute(
         "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?) WHERE user_id=?",
         (amount, user_id))
+
+
+async def spend_stone(user_id: int, amount: int) -> bool:
+    async with db.transaction() as conn:
+        row = await _select_character(conn, user_id)
+        if not row or row["spirit_stone"] < amount:
+            return False
+        await conn.execute(
+            "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
+            (amount, user_id))
+        return True
 
 
 async def spend_stamina(user_id: int, amount: int):
@@ -170,6 +226,81 @@ async def set_cultivation(user_id: int, cultivation: int):
 async def add_cultivation(user_id: int, amount: int):
     await db.execute(
         "UPDATE characters SET cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
+        (amount, user_id))
+
+
+async def create_item_instance(user_id: int, base_key: str, tier: str = None, affixes=None):
+    item = ITEMS[base_key]
+    tier = tier or item.get("tier", "凡")
+    affixes_json = json.dumps(affixes or {}, ensure_ascii=False)
+    await db.execute(
+        "INSERT INTO item_instances(user_id, base_key, tier, affixes_json) VALUES(?,?,?,?)",
+        (user_id, base_key, tier, affixes_json))
+
+
+async def equip_instance(user_id: int, instance_id: int) -> dict:
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT * FROM item_instances WHERE id=? AND user_id=?", (instance_id, user_id))
+        inst = await cur.fetchone()
+        await cur.close()
+        if not inst:
+            return {"status": "not_found"}
+        slot = equipment_slot(inst["base_key"])
+        if not slot:
+            return {"status": "not_equipment"}
+        await conn.execute(
+            "UPDATE item_instances SET equipped_slot=NULL WHERE user_id=? AND equipped_slot=?",
+            (user_id, slot))
+        await conn.execute(
+            "UPDATE item_instances SET equipped_slot=? WHERE id=? AND user_id=?",
+            (slot, instance_id, user_id))
+        return {"status": "ok", "slot": slot, "name": item_name(inst["base_key"])}
+
+
+async def learn_skill_from_pages(user_id: int, page_key: str) -> dict:
+    item = ITEMS.get(page_key, {})
+    skill_key = item.get("skill")
+    need = int(item.get("need", 0))
+    if skill_key not in SKILLS:
+        return {"status": "bad_page"}
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, page_key))
+        inv = await cur.fetchone()
+        await cur.close()
+        if not inv or inv["qty"] < need:
+            return {"status": "need_pages", "need": need, "have": inv["qty"] if inv else 0}
+        cur = await conn.execute(
+            "SELECT 1 FROM character_skills WHERE user_id=? AND skill_key=?",
+            (user_id, skill_key))
+        exists = await cur.fetchone()
+        await cur.close()
+        if exists:
+            return {"status": "known", "skill": skill_key}
+        cur = await conn.execute(
+            "SELECT slot FROM character_skills WHERE user_id=? ORDER BY slot", (user_id,))
+        used = {row["slot"] for row in await cur.fetchall()}
+        await cur.close()
+        slot = next((i for i in range(3) if i not in used), 2)
+        if slot in used:
+            await conn.execute(
+                "UPDATE character_skills SET skill_key=? WHERE user_id=? AND slot=?",
+                (skill_key, user_id, slot))
+        else:
+            await conn.execute(
+                "INSERT INTO character_skills(user_id, skill_key, slot) VALUES(?,?,?)",
+                (user_id, skill_key, slot))
+        await conn.execute(
+            "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
+            (need, user_id, page_key))
+        return {"status": "ok", "skill": skill_key, "slot": slot}
+
+
+async def add_prof(user_id: int, craft_type: str, amount: int):
+    column = "alchemy_prof" if craft_type == "alchemy" else "forge_prof"
+    await db.execute(
+        f"UPDATE characters SET {column} = {column} + ? WHERE user_id=?",
         (amount, user_id))
 
 

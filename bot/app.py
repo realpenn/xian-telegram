@@ -8,7 +8,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from dotenv import load_dotenv
 
-from handlers import bag, cultivate, explore, help as help_h, me, start
+from handlers import bag, craft, cultivate, dungeon, explore, help as help_h, me, shop, skills, start
 from models import db
 
 _COMMANDS = [
@@ -16,6 +16,10 @@ _COMMANDS = [
     BotCommand(command="me", description="查看道行"),
     BotCommand(command="cultivate", description="闭关 / 出关"),
     BotCommand(command="explore", description="历练刷怪"),
+    BotCommand(command="dungeon", description="秘境副本"),
+    BotCommand(command="craft", description="炼丹炼器"),
+    BotCommand(command="skills", description="法宝 / 功法"),
+    BotCommand(command="shop", description="NPC 商店"),
     BotCommand(command="bag", description="储物袋"),
     BotCommand(command="help", description="指南"),
 ]
@@ -35,7 +39,7 @@ async def main():
 
     bot = Bot(token=token)
     dp = Dispatcher()
-    for module in (start, me, cultivate, explore, bag, help_h):
+    for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag, help_h):
         dp.include_router(module.router)
 
     await bot.set_my_commands(_COMMANDS)

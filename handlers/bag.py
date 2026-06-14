@@ -17,11 +17,17 @@ async def render_bag(user_id: int):
     if not char:
         return NEED_START, None
     inv = await character.inventory(user_id)
+    instances = await character.item_instances(user_id)
     lines = ["🎒 储物袋", f"🪙 灵石 {char.spirit_stone}"]
     if inv:
         lines.append("—— 物品 ——")
         lines += [f"{item_name(k)} ×{q}" for k, q in inv]
-    else:
+    if instances:
+        lines.append("—— 法宝 ——")
+        for inst in instances:
+            mark = "已装备" if inst["equipped_slot"] else "未装备"
+            lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}）")
+    if not inv and not instances:
         lines.append("（空空如也，去历练寻些机缘吧）")
     return "\n".join(lines), main_menu()
 

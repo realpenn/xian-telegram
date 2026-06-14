@@ -104,8 +104,10 @@ async def _combatant(user_id: int, name: str) -> Combatant:
     char = await character.get(user_id)
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     return Combatant(name=name, hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                     df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                     df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                     **mods)
 
 
 async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> dict:

@@ -13,11 +13,17 @@ from services import character
 
 def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
     rng = rng or random.Random()
-    pool = ["atk", "hp", "df", "mp", "spd", "crit"]
+    pool = [
+        "atk_pct", "hp_pct", "df_pct", "lifesteal_pct", "reflect_pct",
+        "initiative", "crit", "crit_resist", "pierce",
+    ]
     rolls = 1 + int(root_bone >= 70) + int(prof >= 5)
     affixes = {}
     for key in rng.sample(pool, min(rolls, len(pool))):
-        affixes[key] = rng.randint(4, 12) + prof
+        if key.endswith("_pct"):
+            affixes[key] = round((rng.randint(3, 8) + prof * 0.5) / 100, 3)
+        else:
+            affixes[key] = rng.randint(4, 12) + prof
     return affixes
 
 

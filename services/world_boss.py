@@ -158,8 +158,10 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     char = reserve["char"]
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                       **mods)
     target = _boss_combatant(boss["boss_key"])
     result = simulate(player, target, seed=hash((chat_id, user_id, now)) & 0xFFFFFFFF)
     damage = max(1, target.max_hp - result["d_hp"])

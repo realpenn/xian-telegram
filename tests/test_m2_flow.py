@@ -52,6 +52,25 @@ async def test_forge_equipment_can_be_equipped_and_changes_stats(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_equipment_affixes_apply_percent_stats_and_combat_mods(temp_db):
+    uid = 2016
+    await character.create(uid, "tester")
+    before = await character.stats(await character.get(uid))
+    await character.create_item_instance(
+        uid, "聚灵佩",
+        affixes={"atk_pct": 0.1, "lifesteal_pct": 0.2, "pierce": 9})
+    inst = (await character.item_instances(uid))[0]
+
+    assert (await character.equip_instance(uid, inst["id"]))["status"] == "ok"
+    after = await character.stats(await character.get(uid))
+    mods = await character.combat_mods(uid)
+
+    assert after["atk"] > before["atk"]
+    assert mods["lifesteal_pct"] == 0.2
+    assert mods["pierce"] == 9
+
+
+@pytest.mark.asyncio
 async def test_two_accessories_can_be_equipped(temp_db):
     uid = 2012
     await character.create(uid, "tester")

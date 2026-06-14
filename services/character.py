@@ -77,6 +77,9 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
         debuff_json=json.loads(row["debuff_json"] or "{}"))
 
 
+COMBAT_MOD_KEYS = ("lifesteal_pct", "reflect_pct", "crit_resist", "pierce", "initiative")
+
+
 async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
@@ -138,8 +141,12 @@ async def stats(char: Character) -> dict:
     base = R.base_stats(char.realm, char.stage)
     equipped = await equipped_items(char.user_id)
     if equipped:
+        has_weapon = False
         for inst in equipped:
-            for k, v in equipment_bonus(inst).items():
+            has_weapon = has_weapon or equipment_slot(inst["base_key"]) == "weapon"
+            _apply_equipment_bonus(base, equipment_bonus(inst))
+        if not has_weapon:
+            for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
     else:
         for k, v in weapon_bonus(char.weapon_key).items():
@@ -163,6 +170,20 @@ async def stats(char: Character) -> dict:
     return base
 
 
+def _apply_equipment_bonus(base: dict, bonus: dict):
+    deferred = []
+    for key, val in bonus.items():
+        if key in COMBAT_MOD_KEYS:
+            continue
+        if key.endswith("_pct"):
+            stat_key = key[:-4]
+            deferred.append((stat_key, float(val)))
+        else:
+            base[key] = base.get(key, 0) + val
+    for stat_key, pct in deferred:
+        base[stat_key] = int(base.get(stat_key, 0) * (1 + pct))
+
+
 def equipment_bonus(inst: dict) -> dict:
     item = ITEMS.get(inst["base_key"], {})
     bonus = dict(item.get("bonus", {}))
@@ -170,6 +191,15 @@ def equipment_bonus(inst: dict) -> dict:
     for key, val in affixes.items():
         bonus[key] = bonus.get(key, 0) + val
     return bonus
+
+
+async def combat_mods(user_id: int) -> dict:
+    mods = {key: 0 for key in COMBAT_MOD_KEYS}
+    for inst in await equipped_items(user_id):
+        for key, val in (inst.get("affixes") or {}).items():
+            if key in mods:
+                mods[key] += val
+    return mods
 
 
 async def get_skills(user_id: int):

@@ -40,8 +40,10 @@ async def explore(user_id: int, map_key: str, rng=None) -> dict:
     rng = rng or random.Random()
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                       **mods)
     is_boss = rng.random() < m["boss_rate"]
     mob_sources = [m["boss"]] if is_boss else [rng.choice(m["mobs"]) for _ in range(rng.randint(1, 3))]
     logs = []

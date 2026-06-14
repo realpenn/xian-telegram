@@ -72,8 +72,10 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     rng = random.Random(f"{user_id}:{dungeon_key}:{now}")
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
+                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                       **mods)
     logs = []
     cleared = 0
     for layer in range(1, d["layers"] + 1):

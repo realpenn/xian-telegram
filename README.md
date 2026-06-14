@@ -22,6 +22,7 @@ python -m bot                 # 启动 bot（polling）
 ```
 
 在 Telegram 私聊里发送 `/start` 测灵根，再用 `/cultivate`、`/explore`、`/dungeon`、`/craft`、`/skills`、`/shop` 等指令养成；在群里使用 `/pvp`、`/rank`、`/boss`，用 `/sect` 处理宗门事务。
+玩家向详细说明见 **[问道玩家指南](docs/USER_GUIDE.md)**。
 开发自检：`pytest`（战斗 / 结算 / 突破 / 制造 / 秘境 / 经济 / PvP / Boss / 宗门核心逻辑单测）。
 
 ## v1 范围

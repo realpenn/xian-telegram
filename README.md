@@ -5,9 +5,24 @@
 
 ## 当前状态
 
-📋 **设计评审阶段** —— 尚未开始编码。完整设计见 **[spec.md](spec.md)**。
+🚧 **M1 可玩骨架开发中**（分支 `feat/m1-foundation`）。完整设计见 **[spec.md](spec.md)**。
 
-欢迎道友以 **Issue / Pull Request** 讨论或修改 spec，待定稿后再行实施。
+M1 实现单人核心闭环：**注册测灵根 → 闭关攒修为 → 突破境界 → 历练刷怪**。
+后续模块（秘境 / 世界Boss / 炼丹炼器 / PvP / 宗门）将在 M1 合入后并行开发。
+
+欢迎道友以 **Issue / Pull Request** 讨论。
+
+## 运行（M1）
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # 填入向 @BotFather 申请的 BOT_TOKEN
+python -m bot                 # 启动 bot（polling）
+```
+
+在 Telegram 私聊里发送 `/start` 测灵根，再用 `/cultivate`、`/explore` 等指令游玩。
+开发自检：`pytest`（战斗 / 结算 / 突破核心逻辑单测）。
 
 ## v1 范围
 

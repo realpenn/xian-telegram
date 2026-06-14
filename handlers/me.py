@@ -1,0 +1,51 @@
+"""/me —— 角色面板。"""
+from __future__ import annotations
+
+from aiogram import F, Router
+from aiogram.filters import Command
+from aiogram.types import CallbackQuery, Message
+
+from config import realms as R
+from config.items import item_name
+from config.skills import skill_name
+from handlers.common import NEED_START, menu_with_breakthrough, progress_bar, show
+from services import character
+
+router = Router()
+
+
+async def render_me(user_id: int):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    st = await character.stats(char)
+    cost = R.advance_cost(char.realm, char.stage)
+    cap = R.STAMINA_CAP[char.realm]
+    skills = await character.get_skills(user_id)
+    seclusion = "（闭关中 🧘）" if char.seclusion_at else ""
+    lines = [
+        f"📜 {char.spirit_root} · 根骨 {char.root_bone}",
+        f"境界：{R.realm_label(char.realm, char.stage)} {seclusion}",
+        f"修为：{char.cultivation}/{cost}  {progress_bar(char.cultivation, cost)}",
+        f"🪙 灵石 {char.spirit_stone}    ⚡ 精力 {char.stamina}/{cap}",
+        "—— 法身六维 ——",
+        f"气血 {st['hp']}　法力 {st['mp']}　攻击 {st['atk']}",
+        f"防御 {st['df']}　身法 {st['spd']}　暴击 {st['crit']}",
+        f"⚔️ 法宝：{item_name(char.weapon_key)}",
+        "📖 功法：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
+    ]
+    can_advance = char.cultivation >= cost and not char.seclusion_at
+    return "\n".join(lines), menu_with_breakthrough(can_advance)
+
+
+@router.message(Command("me"))
+async def cmd_me(message: Message):
+    text, markup = await render_me(message.from_user.id)
+    await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "nav:me")
+async def cb_me(callback: CallbackQuery):
+    text, markup = await render_me(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()

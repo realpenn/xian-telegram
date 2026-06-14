@@ -58,6 +58,14 @@ async def consume_action_callback(callback):
     return action
 
 
+async def cleanup_callback_tokens(now: int = None):
+    """清理已消费或已过期的一次性回调 token，避免该表无限增长。"""
+    now = int(time.time()) if now is None else now
+    await db.execute(
+        "DELETE FROM callback_tokens WHERE consumed_at IS NOT NULL OR created_at < ?",
+        (now - TOKEN_TTL_SECONDS,))
+
+
 async def guard_private_message(message) -> bool:
     if is_private_chat(message.chat):
         return False

@@ -162,7 +162,7 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> di
 
     a = await _combatant(attacker_id, "道友")
     d = await _combatant(defender_id, "对手")
-    result = simulate(a, d, seed=hash((attacker_id, defender_id, now)) & 0xFFFFFFFF)
+    result = simulate(a, d, seed=random.getrandbits(32))
     attacker_win = result["winner"] is a
 
     async with db.transaction() as conn:

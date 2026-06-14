@@ -1,6 +1,7 @@
 """世界 Boss lite：群实例、累计伤害、贡献奖励（spec §5.3）。"""
 from __future__ import annotations
 
+import random
 import time
 
 from config.bosses import DEFAULT_BOSS, WORLD_BOSSES
@@ -163,7 +164,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
                        df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
                        **mods)
     target = _boss_combatant(boss["boss_key"])
-    result = simulate(player, target, seed=hash((chat_id, user_id, now)) & 0xFFFFFFFF)
+    result = simulate(player, target, seed=random.getrandbits(32))
     damage = max(1, target.max_hp - result["d_hp"])
 
     rewards = []
@@ -171,6 +172,10 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     async with db.transaction() as conn:
         current = await _active_row(conn, chat_id, now)
         if not current:
+            # Boss 已被他人击杀/过期，退还本次预扣的精力。
+            await conn.execute(
+                "UPDATE characters SET stamina = stamina + ? WHERE user_id=?",
+                (cfg["stamina"], user_id))
             return {"status": "expired"}
         damage = min(damage, current["remaining_hp"])
         remaining = max(0, current["remaining_hp"] - damage)

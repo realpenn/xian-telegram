@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from handlers import (bag, boss, craft, cultivate, daily, dungeon, explore,
                       help as help_h, me, pvp, rank, sect, shop, skills, start)
+from handlers.common import cleanup_callback_tokens
 from models import db
 from services import world_boss
 
@@ -48,6 +49,7 @@ async def main():
     bot = Bot(token=token)
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(world_boss.scheduled_spawn, "cron", hour=20, minute=0, args=[bot])
+    scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.start()
     dp = Dispatcher()
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,

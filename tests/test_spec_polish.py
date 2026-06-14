@@ -52,6 +52,25 @@ async def test_tribulation_success_returns_three_logs(temp_db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_equipped_treasure_improves_big_breakthrough_rate(temp_db, monkeypatch):
+    uid = 4010
+    await character.create(uid, "tester")
+    char = await character.get(uid)
+    last_qi = R.num_stages(0) - 1
+    await character.set_progress(uid, 0, last_qi, R.advance_cost(0, last_qi))
+    await character.add_item(uid, "筑基丹", 1)
+    await character.create_item_instance(uid, "聚灵佩")
+    inst = (await character.item_instances(uid))[0]
+    await character.equip_instance(uid, inst["id"])
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.99)
+
+    res = await breakthrough.try_advance(uid)
+
+    assert res["status"] == "big_fail"
+    assert res["rate"] > breakthrough.big_success_rate(0, char.root_bone)
+
+
+@pytest.mark.asyncio
 async def test_sect_welfare_affects_stats_and_seclusion(temp_db):
     uid = 4003
     await character.create(uid, "tester")

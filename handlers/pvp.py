@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 
 from handlers.common import NEED_START, is_private_chat
-from services import pvp
+from services import pvp, world_boss
 
 router = Router()
 
@@ -46,6 +46,7 @@ async def cmd_pvp(message: Message):
     if is_private_chat(message.chat):
         await message.answer("切磋与天梯请在群中进行。")
         return
+    await world_boss.remember_chat(message.chat.id, message.chat.title)
     opponent_id = None
     opponent_name = "随机对手"
     if message.reply_to_message and message.reply_to_message.from_user:

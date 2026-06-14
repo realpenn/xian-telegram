@@ -21,10 +21,10 @@ def _combatant(src) -> Combatant:
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
 
 
-def _roll_drops(d, rng) -> dict:
+def _roll_drops(d, rng, drop_bonus: float = 0.0) -> dict:
     drops = {}
     for key, weight, qmin, qmax in d["drops"]:
-        if rng.random() < weight / 100.0:
+        if rng.random() < min(100.0, weight * (1 + drop_bonus)) / 100.0:
             drops[key] = drops.get(key, 0) + rng.randint(qmin, qmax)
     return drops
 
@@ -89,7 +89,8 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     stack_drops = {}
     equipment_drops = []
     if cleared:
-        raw_drops = _roll_drops(d, rng)
+        welfare = await character.sect_welfare(user_id)
+        raw_drops = _roll_drops(d, rng, welfare["drop_pct"])
         for key, qty in raw_drops.items():
             if ITEMS.get(key, {}).get("type") == "equipment":
                 for _ in range(qty):

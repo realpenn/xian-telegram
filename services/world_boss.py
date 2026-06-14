@@ -20,6 +20,19 @@ def _boss_combatant(key: str) -> Combatant:
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
 
 
+async def remember_chat(chat_id: int, title: str = None, now: int = None):
+    now = int(time.time()) if now is None else now
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET title=?, last_seen_at=?",
+        (chat_id, title, now, title, now))
+
+
+async def known_chats():
+    rows = await db.fetchall("SELECT chat_id, title FROM bot_chats ORDER BY last_seen_at DESC")
+    return [dict(row) for row in rows]
+
+
 async def _active_row(conn, chat_id: int, now: int):
     cur = await conn.execute(
         "SELECT * FROM world_boss WHERE chat_id=? AND status='alive' ORDER BY id DESC LIMIT 1",
@@ -63,6 +76,29 @@ async def ensure_active(chat_id: int, now: int = None):
         created = await cur.fetchone()
         await cur.close()
         return created
+
+
+def broadcast_text(boss_row) -> str:
+    cfg = WORLD_BOSSES[boss_row["boss_key"]]
+    return (
+        f"🐲 世界 Boss「{cfg['name']}」现世！\n"
+        f"气血 {boss_row['remaining_hp']}/{boss_row['total_hp']}，持续 2 小时。\n"
+        "发送 /boss 或点击挑战合力诛妖。"
+    )
+
+
+async def scheduled_spawn(bot, now: int = None):
+    spawned = []
+    for chat in await known_chats():
+        boss = await ensure_active(chat["chat_id"], now)
+        if boss["status"] != "alive":
+            continue
+        try:
+            await bot.send_message(chat["chat_id"], broadcast_text(boss))
+        except Exception:
+            pass
+        spawned.append(dict(boss))
+    return spawned
 
 
 async def status(chat_id: int, now: int = None):

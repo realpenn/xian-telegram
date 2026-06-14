@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS characters (
     weapon_key    TEXT NOT NULL DEFAULT '新手剑',
     alchemy_prof  INTEGER NOT NULL DEFAULT 0,
     forge_prof    INTEGER NOT NULL DEFAULT 0,
+    debuff_json   TEXT NOT NULL DEFAULT '{}',
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -131,6 +132,11 @@ CREATE TABLE IF NOT EXISTS daily (
     last_checkin_day TEXT,
     streak           INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS bot_chats (
+    chat_id       INTEGER PRIMARY KEY,
+    title         TEXT,
+    last_seen_at  INTEGER NOT NULL
+);
 """
 
 
@@ -147,6 +153,7 @@ async def init_db(path: str = None):
     await _conn.executescript(SCHEMA)
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")
     await _conn.commit()
 
 

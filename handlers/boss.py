@@ -70,6 +70,7 @@ async def cmd_boss(message: Message):
     if is_private_chat(message.chat):
         await message.answer("世界 Boss 请在群中合击。")
         return
+    await world_boss.remember_chat(message.chat.id, message.chat.title)
     await world_boss.ensure_active(message.chat.id)
     res = await world_boss.status(message.chat.id)
     await message.answer(_status_text(res), reply_markup=_markup())

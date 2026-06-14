@@ -11,3 +11,13 @@ SECT_SHOP = {
     "回春术残页": {"contribution": 20, "qty": 1},
     "玄铁剑图纸": {"contribution": 35, "qty": 1},
 }
+
+
+def welfare(level: int) -> dict:
+    return {
+        "stat_pct": min(0.10, level * 0.02),
+        "seclusion_pct": min(0.25, level * 0.05),
+        "stamina_bonus": level * 5,
+        "offline_extra_hours": level,
+        "drop_pct": min(0.15, level * 0.03),
+    }

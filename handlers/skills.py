@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import ITEMS, equipment_slot, item_name
-from config.skills import skill_name
+from config.skills import MIND_SLOT, skill_name
 from handlers.common import NEED_START, guard_private_callback, guard_private_message, main_menu, show
 from services import character
 
@@ -22,10 +22,15 @@ async def render_skills(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
+    mind = await character.get_mind_skill(user_id)
     skills = await character.get_skills(user_id)
     instances = await character.item_instances(user_id)
     inv = await character.inventory(user_id)
-    lines = ["📖 功法 / 法宝", "战技栏：" + ("、".join(skill_name(s) for s in skills) if skills else "无")]
+    lines = [
+        "📖 功法 / 法宝",
+        "心法：" + (skill_name(mind) if mind else "无"),
+        "战技栏：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
+    ]
     rows = []
     if instances:
         lines.append("—— 法宝 ——")
@@ -45,7 +50,7 @@ async def render_skills(user_id: int):
             page_buttons.append([InlineKeyboardButton(
                 text=f"领悟 {skill_name(item['skill'])}", callback_data=f"learn:{key}")])
     if page_buttons:
-        lines.append("残页已足，可领悟新战技。")
+        lines.append("残页已足，可领悟新功法。")
         rows += page_buttons
     rows += main_menu().inline_keyboard
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
@@ -53,10 +58,11 @@ async def render_skills(user_id: int):
 
 def _result_text(res: dict) -> str:
     s = res["status"]
-    if s == "ok" and "slot" in res:
+    if s == "ok" and "name" in res:
         return f"已装备 {res['name']}。"
     if s == "ok":
-        return f"已领悟 {skill_name(res['skill'])}，置入战技栏。"
+        slot_name = "心法栏" if res.get("slot") == MIND_SLOT else "战技栏"
+        return f"已领悟 {skill_name(res['skill'])}，置入{slot_name}。"
     if s == "need_pages":
         return f"残页不足（需 {res['need']}，现有 {res['have']}）。"
     if s == "known":

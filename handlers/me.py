@@ -1,6 +1,8 @@
 """/me —— 角色面板。"""
 from __future__ import annotations
 
+import time
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
@@ -21,7 +23,9 @@ async def render_me(user_id: int):
         return NEED_START, None
     st = await character.stats(char)
     cost = R.advance_cost(char.realm, char.stage)
-    cap = R.STAMINA_CAP[char.realm]
+    welfare = await character.sect_welfare(user_id)
+    cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
+    mind = await character.get_mind_skill(user_id)
     skills = await character.get_skills(user_id)
     seclusion = "（闭关中 🧘）" if char.seclusion_at else ""
     lines = [
@@ -33,8 +37,11 @@ async def render_me(user_id: int):
         f"气血 {st['hp']}　法力 {st['mp']}　攻击 {st['atk']}",
         f"防御 {st['df']}　身法 {st['spd']}　暴击 {st['crit']}",
         f"⚔️ 法宝：{item_name(char.weapon_key)}",
-        "📖 功法：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
+        "📖 心法：" + (skill_name(mind) if mind else "无"),
+        "📖 战技：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
     ]
+    if int(char.debuff_json.get("unstable_until", 0)) > int(time.time()):
+        lines.append("⚠️ 道基不稳：法身六维暂降。")
     can_advance = char.cultivation >= cost and not char.seclusion_at
     return "\n".join(lines), menu_with_breakthrough(can_advance)
 

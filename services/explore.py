@@ -9,10 +9,10 @@ from services import character
 from services.combat import Combatant, simulate
 
 
-def _roll_drops(m, rng) -> dict:
+def _roll_drops(m, rng, drop_bonus: float = 0.0) -> dict:
     drops = {}
     for key, weight, qmin, qmax in m["drops"]:
-        if rng.random() < weight / 100.0:
+        if rng.random() < min(100.0, weight * (1 + drop_bonus)) / 100.0:
             drops[key] = drops.get(key, 0) + rng.randint(qmin, qmax)
     return drops
 
@@ -22,7 +22,7 @@ def _combatant_from_mob(src) -> Combatant:
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
 
 
-async def explore(user_id: int, map_key: str) -> dict:
+async def explore(user_id: int, map_key: str, rng=None) -> dict:
     m = MAPS.get(map_key)
     if not m:
         return {"status": "bad_map"}
@@ -37,24 +37,35 @@ async def explore(user_id: int, map_key: str) -> dict:
         return reserved
     char = reserved["char"]
 
-    rng = random.Random()
+    rng = rng or random.Random()
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
                        df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"])
     is_boss = rng.random() < m["boss_rate"]
-    mob_src = m["boss"] if is_boss else rng.choice(m["mobs"])
-    result = simulate(player, _combatant_from_mob(mob_src), seed=rng.randint(1, 10_000_000))
-    win = result["winner"] is player
+    mob_sources = [m["boss"]] if is_boss else [rng.choice(m["mobs"]) for _ in range(rng.randint(1, 3))]
+    logs = []
+    win = True
+    for idx, mob_src in enumerate(mob_sources, 1):
+        result = simulate(player, _combatant_from_mob(mob_src), seed=rng.randint(1, 10_000_000))
+        logs.append(f"第 {idx} 战：遭遇 {mob_src['name']}")
+        shown = result["log"] if len(result["log"]) <= 5 else (result["log"][:4] + ["……", result["log"][-1]])
+        logs.extend(shown[1:])
+        if result["winner"] is not player:
+            win = False
+            break
+        player.hp = max(1, result["a_hp"])
 
     reward = {"stone": 0, "cult": 0, "drops": {}}
     if win:
         mult = 2 if is_boss else 1
         stone = rng.randint(*m["stone"]) * mult
         cult = m["cult"] * mult
-        drops = _roll_drops(m, rng)
+        welfare = await character.sect_welfare(user_id)
+        drops = _roll_drops(m, rng, welfare["drop_pct"])
         await character.grant_reward(user_id, stone, cult, drops)
         reward = {"stone": stone, "cult": cult, "drops": drops}
 
-    return {"status": "ok", "win": win, "is_boss": is_boss, "mob": mob_src["name"],
-            "log": result["log"], "reward": reward, "stamina_left": reserved["stamina_left"]}
+    return {"status": "ok", "win": win, "is_boss": is_boss,
+            "mob": "、".join(src["name"] for src in mob_sources),
+            "log": logs, "reward": reward, "stamina_left": reserved["stamina_left"]}

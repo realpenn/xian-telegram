@@ -21,7 +21,8 @@ async def render_menu(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
-    cap = R.STAMINA_CAP[char.realm]
+    welfare = await character.sect_welfare(user_id)
+    cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
     rows = [[InlineKeyboardButton(text=f"{m['name']}（精力{m['stamina']}）",
                                   callback_data=f"ex:{key}")]
             for key, m in maps_for_realm(char.realm)]

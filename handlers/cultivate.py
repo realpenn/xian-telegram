@@ -46,12 +46,17 @@ def _bt_text(res: dict) -> str:
     if s == "small_success":
         return f"📈 水到渠成，道友晋入 {res['label']}！"
     if s == "big_success":
+        tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         if res["tribulation"]:
-            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！"
+            return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{tail}"
         return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！"
     if s == "big_fail":
         head = "⚡ 天劫凶猛" if res["tribulation"] else "✗ 冲关受阻"
-        return f"{head}，道友未能破境，道基微损（修为 −{res['loss']}），所幸未曾跌境。来日再战。"
+        tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        return (
+            f"{head}，道友未能破境，道基不稳（修为 −{res['loss']}，"
+            f"法身六维暂降），所幸未曾跌境。来日再战。{tail}"
+        )
     return "天机紊乱，突破未果。"
 
 

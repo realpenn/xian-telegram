@@ -23,10 +23,11 @@ def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):
 
 
 def seclusion_gain(realm: int, start_at: int, now: int,
-                   root_bone: int, place_factor: float = 1.0) -> int:
+                   root_bone: int, place_factor: float = 1.0,
+                   offline_cap_hours: int = OFFLINE_CAP_HOURS) -> int:
     """闭关所得修为 = 速率 × min(经过, 离线上限)。速率含根骨与地点系数。"""
     rate = SECLUSION_RATE[realm] * (1 + root_bone / 200) * place_factor
-    elapsed = min(now - start_at, OFFLINE_CAP_HOURS * 3600)
+    elapsed = min(now - start_at, offline_cap_hours * 3600)
     if elapsed < 0:
         elapsed = 0
     return int(rate * elapsed / 3600)

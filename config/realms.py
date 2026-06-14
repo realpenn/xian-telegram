@@ -38,7 +38,6 @@ _ANCHORS = {
 }
 
 STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200}
-SECLUSION_RATE = {0: 15, 1: 45, 2: 165, 3: 675}  # 修为/小时
 
 
 def num_stages(realm: int) -> int:

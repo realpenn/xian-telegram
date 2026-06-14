@@ -89,7 +89,7 @@ async def test_sect_welfare_affects_stats_and_seclusion(temp_db):
     await db.execute("UPDATE characters SET seclusion_at=? WHERE user_id=?", (1000, uid))
     char = await character.get(uid)
     res = await character.collect_seclusion(uid, now=4600)
-    without_sect = settle.seclusion_gain(1, 1000, 4600, char.root_bone)
+    without_sect = settle.seclusion_gain(1, 0, 1000, 4600)
     assert res["gained"] > without_sect
 
 
@@ -357,9 +357,26 @@ async def test_temporary_pill_buff_improves_seclusion_gain(temp_db):
 
     await character.start_seclusion(uid, now=1000)
     res = await character.collect_seclusion(uid, now=4600)
-    without_buff = settle.seclusion_gain(char.realm, 1000, 4600, char.root_bone)
+    without_buff = settle.seclusion_gain(char.realm, char.stage, 1000, 4600)
 
     assert res["gained"] > without_buff
+
+
+@pytest.mark.asyncio
+async def test_split_seclusion_sessions_accumulate_to_one_stage(temp_db):
+    uid = 4028
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 0, 3, 0)
+    cost = R.advance_cost(0, 3)
+
+    await character.start_seclusion(uid, now=1000)
+    first = await character.collect_seclusion(uid, now=1000 + 12 * 3600)
+    await character.start_seclusion(uid, now=1000 + 12 * 3600 + 1)
+    second = await character.collect_seclusion(uid, now=1000 + 24 * 3600 + 1)
+    char = await character.get_at(uid, now=1000 + 24 * 3600 + 1)
+
+    assert first["gained"] + second["gained"] == cost
+    assert char.cultivation == cost
 
 
 @pytest.mark.asyncio

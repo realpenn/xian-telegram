@@ -1,3 +1,4 @@
+from config import realms as R
 from services import settle
 
 
@@ -34,20 +35,29 @@ def test_regen_already_full():
 
 
 def test_seclusion_offline_cap():
-    g = settle.seclusion_gain(0, 0, 100 * 3600, root_bone=50, place_factor=1.0)
-    rate = 15 * (1 + 50 / 200)  # 炼气速率 × 根骨系数
-    assert g == int(rate * settle.OFFLINE_CAP_HOURS)
+    g = settle.seclusion_gain(0, 0, 0, 100 * 3600, place_factor=1.0)
+    assert g == R.advance_cost(0, 0) // 2
 
 
 def test_seclusion_negative_elapsed():
-    assert settle.seclusion_gain(0, 1000, 500, 50) == 0
+    assert settle.seclusion_gain(0, 0, 1000, 500) == 0
 
 
-def test_seclusion_root_bone_scales():
-    low = settle.seclusion_gain(0, 0, 3600, root_bone=40)
-    high = settle.seclusion_gain(0, 0, 3600, root_bone=80)
+def test_seclusion_rate_uses_current_stage_cost():
+    low = settle.seclusion_gain(0, 0, 0, 3600)
+    high = settle.seclusion_gain(0, 12, 0, 3600)
     assert high > low
 
 
 def test_seclusion_half_hour_is_below_first_advance_cost():
-    assert settle.seclusion_gain(0, 0, 1800, root_bone=60) < 200
+    assert settle.seclusion_gain(0, 0, 0, 1800) < R.advance_cost(0, 0)
+
+
+def test_two_twelve_hour_sessions_equal_one_stage_with_remainder():
+    cost = R.advance_cost(0, 1)
+    first, remainder = settle.seclusion_gain_with_remainder(0, 1, 0, 12 * 3600)
+    second, remainder = settle.seclusion_gain_with_remainder(
+        0, 1, 0, 12 * 3600, remainder_units=remainder)
+
+    assert first + second == cost
+    assert remainder == 0

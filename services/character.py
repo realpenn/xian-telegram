@@ -99,6 +99,21 @@ def temporary_seclusion_pct(state: dict, now: int = None) -> float:
     return pct
 
 
+def _seclusion_remainder(state: dict, realm: int, stage: int) -> int:
+    key = f"{realm}:{stage}"
+    data = state.get("seclusion_remainder") or {}
+    if data.get("key") != key:
+        return 0
+    return int(data.get("units", 0) or 0)
+
+
+def _set_seclusion_remainder(state: dict, realm: int, stage: int, units: int):
+    if units > 0:
+        state["seclusion_remainder"] = {"key": f"{realm}:{stage}", "units": int(units)}
+    else:
+        state.pop("seclusion_remainder", None)
+
+
 async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
@@ -557,18 +572,23 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             return {"status": "not_in"}
         welfare = await _sect_welfare(conn, user_id)
         stamina, stamina_at = _settled_stamina(row, now, welfare)
-        gained = settle.seclusion_gain(
-            row["realm"], row["seclusion_at"], now, row["root_bone"],
-            place_factor=(
-                (1 + welfare["seclusion_pct"])
-                * (1 + temporary_seclusion_pct(json.loads(row["debuff_json"] or "{}"), now))
-            ),
+        state = json.loads(row["debuff_json"] or "{}")
+        place_factor = (
+            (1 + welfare["seclusion_pct"])
+            * (1 + temporary_seclusion_pct(state, now))
+        )
+        gained, remainder_units = settle.seclusion_gain_with_remainder(
+            row["realm"], row["stage"], row["seclusion_at"], now,
+            place_factor=place_factor,
+            remainder_units=_seclusion_remainder(state, row["realm"], row["stage"]),
             offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
+        _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
         new_cult = row["cultivation"] + gained
         await conn.execute(
-            "UPDATE characters SET cultivation=?, stamina=?, stamina_at=?, seclusion_at=NULL "
+            "UPDATE characters SET cultivation=?, stamina=?, stamina_at=?, "
+            "seclusion_at=NULL, debuff_json=? "
             "WHERE user_id=?",
-            (new_cult, stamina, stamina_at, user_id))
+            (new_cult, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
         cost = R.advance_cost(row["realm"], row["stage"])
         return {"status": "collected", "gained": gained, "cultivation": new_cult,
                 "cost": cost, "can_advance": new_cult >= cost,

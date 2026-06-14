@@ -1,11 +1,11 @@
 """/pvp —— 群内切磋 / 天梯。"""
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from handlers.common import NEED_START, is_private_chat
+from handlers.common import action_callback_data, consume_action_callback, NEED_START, is_private_chat, show
 from services import pvp, world_boss
 
 router = Router()
@@ -42,17 +42,33 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
     return "切磋未成。"
 
 
+def _preview_text(opponent_name: str) -> str:
+    return "\n".join([
+        f"⚔️ 切磋邀战：道友 vs {opponent_name}",
+        "此战只影响天梯积分与声望，不掉资源。",
+        "确认后即刻自动结算。",
+    ])
+
+
+async def _confirm_markup(user_id: int, defender_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚔️ 确认切磋",
+            callback_data=await action_callback_data(user_id, f"pvp:duel:{defender_id}"))]
+    ])
+
+
 @router.message(Command("pvp"))
 async def cmd_pvp(message: Message):
     if is_private_chat(message.chat):
         await message.answer("切磋与天梯请在群中进行。")
         return
     await world_boss.remember_chat(message.chat.id, message.chat.title)
-    opponent_id = None
+    defender_id = None
     opponent_name = "随机对手"
     if message.reply_to_message and message.reply_to_message.from_user:
         opponent = message.reply_to_message.from_user
-        opponent_id = opponent.id
+        defender_id = opponent.id
         opponent_name = _name(opponent)
     else:
         parts = message.text.split(maxsplit=1)
@@ -61,7 +77,23 @@ async def cmd_pvp(message: Message):
             if found["status"] != "ok":
                 await message.answer("未寻得指定对手。可用 /pvp 随机匹配、回复某人 /pvp，或 /pvp @道号、/pvp #1。")
                 return
-            opponent_id = found["user_id"]
+            defender_id = found["user_id"]
             opponent_name = str(found["name"])
-    res = await pvp.duel(message.from_user.id, opponent_id)
-    await message.answer(_text(res, opponent_name))
+    preview = await pvp.preview_duel(message.from_user.id, defender_id)
+    if preview["status"] != "ok":
+        await message.answer(_text(preview, opponent_name))
+        return
+    await message.answer(
+        _preview_text(opponent_name if defender_id else preview["name"]),
+        reply_markup=await _confirm_markup(message.from_user.id, preview["defender_id"]))
+
+
+@router.callback_query(F.data.startswith("pvp:duel:"))
+async def cb_pvp_confirm(callback: CallbackQuery):
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("pvp:duel:"):
+        return
+    defender_id = int(action.rsplit(":", 1)[1])
+    res = await pvp.duel(callback.from_user.id, defender_id)
+    await show(callback, _text(res), None)
+    await callback.answer()

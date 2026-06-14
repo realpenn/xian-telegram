@@ -153,6 +153,24 @@ async def test_pvp_opponent_arg_supports_username_and_rank(temp_db):
     assert by_rank["user_id"] == ranked
 
 
+@pytest.mark.asyncio
+async def test_pvp_preview_does_not_spend_daily_count(temp_db):
+    attacker = 4020
+    defender = 4021
+    await character.create(attacker, "attacker")
+    await character.create(defender, "defender")
+
+    preview = await pvp.preview_duel(attacker, defender)
+    before = await db.fetchone("SELECT daily_count FROM pvp_ratings WHERE user_id=?", (attacker,))
+    duel = await pvp.duel(attacker, defender, now=1000)
+    after = await db.fetchone("SELECT daily_count FROM pvp_ratings WHERE user_id=?", (attacker,))
+
+    assert preview["status"] == "ok"
+    assert before is None
+    assert duel["status"] == "ok"
+    assert after["daily_count"] == 1
+
+
 class _FakeRng:
     def random(self):
         return 1.0

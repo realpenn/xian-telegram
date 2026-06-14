@@ -100,18 +100,7 @@ async def opponent_from_arg(arg: str):
     return {"status": "not_found"}
 
 
-async def _combatant(user_id: int, name: str) -> Combatant:
-    char = await character.get(user_id)
-    st = await character.stats(char)
-    skills = await character.get_skills(user_id)
-    mods = await character.combat_mods(user_id)
-    return Combatant(name=name, hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                     df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
-                     **mods)
-
-
-async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> dict:
-    now = int(time.time()) if now is None else now
+async def _validate_pair(attacker_id: int, defender_id: int = None) -> dict:
     if defender_id is None:
         defender_id = await random_opponent(attacker_id)
     if not defender_id:
@@ -129,6 +118,36 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> di
         return {"status": "opponent_busy"}
     if abs(attacker.realm - defender.realm) > 1:
         return {"status": "realm_gap"}
+    return {"status": "ok", "defender_id": defender_id}
+
+
+async def preview_duel(attacker_id: int, defender_id: int = None) -> dict:
+    res = await _validate_pair(attacker_id, defender_id)
+    if res["status"] != "ok":
+        return res
+    row = await db.fetchone(
+        "SELECT username FROM users WHERE tg_user_id=?",
+        (res["defender_id"],))
+    return {"status": "ok", "defender_id": res["defender_id"],
+            "name": row["username"] if row and row["username"] else str(res["defender_id"])}
+
+
+async def _combatant(user_id: int, name: str) -> Combatant:
+    char = await character.get(user_id)
+    st = await character.stats(char)
+    skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
+    return Combatant(name=name, hp=st["hp"], mp=st["mp"], atk=st["atk"],
+                     df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
+                     **mods)
+
+
+async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
+    pair = await _validate_pair(attacker_id, defender_id)
+    if pair["status"] != "ok":
+        return pair
+    defender_id = pair["defender_id"]
 
     day = _day(now)
     async with db.transaction() as conn:

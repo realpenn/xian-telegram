@@ -4,7 +4,7 @@ import pytest_asyncio
 from config import realms as R
 from handlers.common import action_callback_data, consume_action_callback
 from models import db
-from services import breakthrough, character, crafting, explore, items, sect, world_boss
+from services import breakthrough, character, crafting, explore, items, pvp, sect, world_boss
 
 
 @pytest_asyncio.fixture
@@ -87,6 +87,49 @@ async def test_sect_welfare_affects_stats_and_seclusion(temp_db):
     char = await character.get(uid)
     res = await character.collect_seclusion(uid, now=4600)
     assert res["gained"] > 600 * (1 + char.root_bone / 200)
+
+
+@pytest.mark.asyncio
+async def test_sect_leader_can_upgrade_with_contribution_pool(temp_db):
+    uid = 4011
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_stone(uid, 500)
+    assert (await sect.create(uid, "升阶宗", now=1000))["status"] == "ok"
+    await db.execute("UPDATE sects SET contribution_pool=100 WHERE leader_user_id=?", (uid,))
+
+    res = await sect.upgrade(uid)
+    mine = await sect.my_sect(uid)
+
+    assert res["status"] == "upgraded"
+    assert mine["level"] == 2
+
+
+def test_root_bone_roll_stays_in_spec_range():
+    class Rng:
+        def __init__(self, value):
+            self.value = value
+
+        def gauss(self, mean, stddev):
+            return self.value
+
+    assert character.roll_root_bone(Rng(1)) == 40
+    assert character.roll_root_bone(Rng(999)) == 80
+    assert character.roll_root_bone(Rng(60.2)) == 60
+
+
+@pytest.mark.asyncio
+async def test_pvp_random_opponent_prefers_rating_band(temp_db):
+    uid = 4012
+    close_uid = 4013
+    far_uid = 4014
+    for user_id in (uid, close_uid, far_uid):
+        await character.create(user_id, f"u{user_id}")
+    await db.execute(
+        "INSERT INTO pvp_ratings(user_id, rating) VALUES(?, ?), (?, ?), (?, ?)",
+        (uid, 1000, close_uid, 1100, far_uid, 1600))
+
+    assert await pvp.random_opponent(uid) == close_uid
 
 
 class _FakeRng:

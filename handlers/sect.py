@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import item_name
-from config.sects import CREATE_STONE_COST, SECT_SHOP
+from config.sects import CREATE_STONE_COST, SECT_SHOP, upgrade_cost
 from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
                              main_menu, show)
 from services import sect
@@ -36,6 +36,10 @@ async def render_sect(user_id: int):
         rows.append([InlineKeyboardButton(
             text="📜 宗门任务",
             callback_data=await action_callback_data(user_id, "sect:task"))])
+        if mine["role"] == "宗主":
+            rows.append([InlineKeyboardButton(
+                text=f"⬆️ 升级宗门（贡献池 {upgrade_cost(mine['level'])}）",
+                callback_data=await action_callback_data(user_id, "sect:upgrade"))])
         rows.append([InlineKeyboardButton(text="🏪 宗门商店", callback_data="sect:shop")])
     rows += main_menu().inline_keyboard
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
@@ -47,6 +51,8 @@ def _result_text(res: dict) -> str:
         return f"宗门任务完成，贡献 +{res['contribution']}，灵石 +{res['stone']}。"
     if s == "ok" and "item" in res:
         return f"兑换 {res['item']}×{res['qty']}，消耗贡献 {res['cost']}。"
+    if s == "upgraded":
+        return f"宗门「{res['name']}」升至 Lv.{res['level']}，消耗贡献池 {res['cost']}。"
     if s == "ok" and "name" in res:
         return f"已入宗门「{res['name']}」。"
     if s == "ok":
@@ -69,6 +75,10 @@ def _result_text(res: dict) -> str:
         return "宗主尚有门人在宗，不可独自离去。"
     if s == "no_contribution":
         return f"贡献不足（需 {res['need']}，现有 {res['have']}）。"
+    if s == "no_pool":
+        return f"宗门贡献池不足（需 {res['need']}，现有 {res['have']}）。"
+    if s == "no_permission":
+        return "只有宗主可升级宗门。"
     if s == "missing":
         return NEED_START
     return "宗门事务未成。"
@@ -91,6 +101,9 @@ async def cmd_sect(message: Message):
     if len(parts) >= 2 and parts[1] == "leave":
         await message.answer(_result_text(await sect.leave(message.from_user.id)))
         return
+    if len(parts) >= 2 and parts[1] == "upgrade":
+        await message.answer(_result_text(await sect.upgrade(message.from_user.id)))
+        return
     if len(parts) >= 3 and parts[1] == "buy":
         await message.answer(_result_text(await sect.redeem(message.from_user.id, parts[2])))
         return
@@ -110,6 +123,14 @@ async def cb_task(callback: CallbackQuery):
     if await consume_action_callback(callback) != "sect:task":
         return
     await show(callback, _result_text(await sect.task(callback.from_user.id)), main_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("sect:upgrade:"))
+async def cb_upgrade(callback: CallbackQuery):
+    if await consume_action_callback(callback) != "sect:upgrade":
+        return
+    await show(callback, _result_text(await sect.upgrade(callback.from_user.id)), main_menu())
     await callback.answer()
 
 

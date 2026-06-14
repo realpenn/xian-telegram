@@ -16,6 +16,8 @@ from services import settle
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
+ROOT_BONE_MIN = 40
+ROOT_BONE_MAX = 80
 
 
 @dataclass
@@ -79,9 +81,13 @@ async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
 
+def roll_root_bone(rng=random) -> int:
+    return max(ROOT_BONE_MIN, min(ROOT_BONE_MAX, int(round(rng.gauss(60, 9)))))
+
+
 async def create(user_id: int, username: str) -> Character:
     now = int(time.time())
-    root = random.randint(40, 80)
+    root = roll_root_bone(random)
     spirit = random.choice(SPIRIT_ROOTS)
     cap = R.STAMINA_CAP[0]
     async with db.transaction() as conn:

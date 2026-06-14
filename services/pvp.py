@@ -43,12 +43,21 @@ async def random_opponent(user_id: int):
     me = await character.get(user_id)
     if not me:
         return None
+    my_rating = await db.fetchone(
+        "SELECT rating FROM pvp_ratings WHERE user_id=?", (user_id,))
+    rating = my_rating["rating"] if my_rating else 1000
     rows = await db.fetchall(
-        "SELECT user_id, realm, seclusion_at FROM characters WHERE user_id<>?", (user_id,))
+        "SELECT c.user_id, c.realm, c.seclusion_at, COALESCE(p.rating, 1000) AS rating "
+        "FROM characters c LEFT JOIN pvp_ratings p ON p.user_id=c.user_id "
+        "WHERE c.user_id<>?",
+        (user_id,))
     eligible = [
         row for row in rows
         if not row["seclusion_at"] and abs(row["realm"] - me.realm) <= 1
     ]
+    close = [row for row in eligible if abs(row["rating"] - rating) <= 200]
+    if close:
+        eligible = close
     if not eligible:
         eligible = [row for row in rows if not row["seclusion_at"]]
     return random.choice(eligible)["user_id"] if eligible else None

@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS dungeon_runs (
 CREATE TABLE IF NOT EXISTS pvp_ratings (
     user_id        INTEGER PRIMARY KEY,
     rating         INTEGER NOT NULL DEFAULT 1000,
+    reputation     INTEGER NOT NULL DEFAULT 0,
     wins           INTEGER NOT NULL DEFAULT 0,
     losses         INTEGER NOT NULL DEFAULT 0,
     daily_count    INTEGER NOT NULL DEFAULT 0,
@@ -165,6 +166,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
+    await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _conn.commit()
 
 

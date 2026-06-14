@@ -10,6 +10,8 @@ from models import db
 
 K_FACTOR = 32
 DAILY_LIMIT = 10
+WIN_REPUTATION = 3
+LOSS_REPUTATION = 1
 
 
 def _day(ts: int) -> str:
@@ -26,8 +28,8 @@ def _delta(ra: int, rb: int, score: float) -> int:
 
 async def ensure_rating(conn, user_id: int):
     await conn.execute(
-        "INSERT OR IGNORE INTO pvp_ratings(user_id, rating, wins, losses, daily_count, daily_reset_at) "
-        "VALUES(?,1000,0,0,0,0)",
+        "INSERT OR IGNORE INTO pvp_ratings(user_id, rating, reputation, wins, losses, daily_count, daily_reset_at) "
+        "VALUES(?,1000,0,0,0,0,0)",
         (user_id,))
 
 
@@ -148,26 +150,31 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> di
         score = 1.0 if attacker_win else 0.0
         change = _delta(ar["rating"], dr["rating"], score)
         defender_change = _delta(dr["rating"], ar["rating"], 1.0 - score)
+        attacker_rep = WIN_REPUTATION if attacker_win else LOSS_REPUTATION
+        defender_rep = LOSS_REPUTATION if attacker_win else WIN_REPUTATION
         await conn.execute(
-            "UPDATE pvp_ratings SET rating=?, wins=wins+?, losses=losses+? WHERE user_id=?",
-            (max(0, ar["rating"] + change), 1 if attacker_win else 0,
+            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+? "
+            "WHERE user_id=?",
+            (max(0, ar["rating"] + change), attacker_rep, 1 if attacker_win else 0,
              0 if attacker_win else 1, attacker_id))
         await conn.execute(
-            "UPDATE pvp_ratings SET rating=?, wins=wins+?, losses=losses+? WHERE user_id=?",
-            (max(0, dr["rating"] + defender_change), 0 if attacker_win else 1,
+            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+? "
+            "WHERE user_id=?",
+            (max(0, dr["rating"] + defender_change), defender_rep, 0 if attacker_win else 1,
              1 if attacker_win else 0, defender_id))
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (20 if attacker_win else 5, attacker_id))
 
     return {"status": "ok", "win": attacker_win, "rating_delta": change,
+            "reputation_gain": WIN_REPUTATION if attacker_win else LOSS_REPUTATION,
             "defender_id": defender_id, "log": result["log"],
             "rounds": result["rounds"]}
 
 
 async def top(limit: int = 10):
     rows = await db.fetchall(
-        "SELECT p.user_id, p.rating, p.wins, p.losses, u.username "
+        "SELECT p.user_id, p.rating, p.reputation, p.wins, p.losses, u.username "
         "FROM pvp_ratings p LEFT JOIN users u ON u.tg_user_id=p.user_id "
         "ORDER BY p.rating DESC, p.wins DESC LIMIT ?",
         (limit,))

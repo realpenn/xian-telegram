@@ -22,7 +22,8 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
         return "\n".join([
             f"⚔️ 切磋：道友 vs {opponent_name}",
             *shown,
-            f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}。",
+            f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}，"
+            f"声望 +{res['reputation_gain']}。",
         ])
     if s == "no_opponent":
         return "暂未寻得合适对手。可让另一位道友先 /start。"

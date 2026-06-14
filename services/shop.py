@@ -1,0 +1,52 @@
+"""NPC 商店与回收（spec §9）。"""
+from __future__ import annotations
+
+from config.items import item_name, sell_price
+from config.shop import SHOP_ITEMS
+from models import db
+
+
+async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
+    good = SHOP_ITEMS.get(item_key)
+    if not good or qty <= 0:
+        return {"status": "bad_item"}
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT realm, spirit_stone FROM characters WHERE user_id=?", (user_id,))
+        char = await cur.fetchone()
+        await cur.close()
+        if not char:
+            return {"status": "missing"}
+        if char["realm"] < good["realm"]:
+            return {"status": "locked"}
+        cost = good["price"] * qty
+        if char["spirit_stone"] < cost:
+            return {"status": "no_stone", "need": cost, "have": char["spirit_stone"]}
+        await conn.execute(
+            "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
+            (cost, user_id))
+        await conn.execute(
+            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
+            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+            (user_id, item_key, qty, qty))
+        return {"status": "ok", "item": item_name(item_key), "qty": qty, "cost": cost}
+
+
+async def sell(user_id: int, item_key: str, qty: int = 1) -> dict:
+    price = sell_price(item_key)
+    if price <= 0 or qty <= 0:
+        return {"status": "bad_item"}
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, item_key))
+        inv = await cur.fetchone()
+        await cur.close()
+        if not inv or inv["qty"] < qty:
+            return {"status": "no_item", "item": item_name(item_key), "have": inv["qty"] if inv else 0}
+        gain = price * qty
+        await conn.execute(
+            "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
+            (qty, user_id, item_key))
+        await conn.execute(
+            "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
+            (gain, user_id))
+        return {"status": "ok", "item": item_name(item_key), "qty": qty, "gain": gain}

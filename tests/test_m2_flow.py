@@ -2,6 +2,7 @@ import pytest
 import pytest_asyncio
 
 from config import realms as R
+from config.dungeons import DUNGEONS
 from models import db
 from services import character, crafting, dungeon, shop
 
@@ -156,6 +157,51 @@ async def test_dungeon_requires_single_run_stamina_cost(temp_db):
 
     assert res["status"] == "no_stamina"
     assert res["need"] == 50
+
+
+def test_dungeons_cover_each_realm_with_daily_stamina_budget():
+    realms = {d["realm"] for d in DUNGEONS.values()}
+    assert realms == set(range(len(R.REALM_NAMES)))
+
+    for d in DUNGEONS.values():
+        realm = d["realm"]
+        assert d["stamina"] == R.STAMINA_CAP[realm] // dungeon.DUNGEON_DAILY_LIMIT
+        assert d["cult"] > 0
+        assert d["stone"][0] > 0
+
+
+def test_dungeon_strength_scales_by_realm():
+    by_realm = sorted(DUNGEONS.values(), key=lambda d: d["realm"])
+    boss_hp = [d["boss"]["hp"] for d in by_realm]
+    boss_atk = [d["boss"]["atk"] for d in by_realm]
+    rewards = [d["cult"] for d in by_realm]
+
+    assert boss_hp == sorted(boss_hp)
+    assert boss_atk == sorted(boss_atk)
+    assert rewards == sorted(rewards)
+
+
+@pytest.mark.asyncio
+async def test_each_realm_can_start_and_collect_its_dungeon(temp_db):
+    for realm, key in enumerate(("lingxi", "xuanming", "qingyun", "tianxu")):
+        uid = 2020 + realm
+        await character.create(uid, f"tester-{realm}")
+        await character.set_progress(uid, realm, 0, 0)
+        await db.execute(
+            "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+            (R.STAMINA_CAP[realm], 1000, uid))
+
+        started = await dungeon.start(uid, key, now=1000 + realm)
+        pending = await dungeon.collect(uid, now=started["finish_at"] - 1)
+        res = await dungeon.collect(uid, now=started["finish_at"])
+
+        assert started["status"] == "started"
+        assert started["stamina_left"] == R.STAMINA_CAP[realm] - DUNGEONS[key]["stamina"]
+        assert pending["status"] == "pending"
+        assert res["status"] == "ok"
+        assert res["dungeon_key"] == key
+        assert res["cleared"] >= 1
+        assert res["layers"] == DUNGEONS[key]["layers"]
 
 
 @pytest.mark.asyncio

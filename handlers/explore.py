@@ -9,7 +9,8 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 from config import realms as R
 from config.items import item_name
 from config.maps import maps_for_realm
-from handlers.common import NEED_START, main_menu, show
+from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
+                             main_menu, show)
 from services import character
 from services import explore as explore_service
 
@@ -40,8 +41,12 @@ def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "locked":
         return f"此地凶险，需修为至 {res['need']} 方可踏足。"
+    if s == "in_seclusion":
+        return "道友尚在闭关，神游太虚，不可同时外出历练。"
     if s == "no_stamina":
         return f"精力不济（需 {res['need']}，余 {res['have']}），且去闭关歇息。"
+    if s == "missing":
+        return NEED_START
     if s == "bad_map":
         return "查无此地。"
     log = res["log"]
@@ -64,12 +69,16 @@ def _result_text(res: dict) -> str:
 
 @router.message(Command("explore"))
 async def cmd_explore(message: Message):
+    if await guard_private_message(message):
+        return
     text, markup = await render_menu(message.from_user.id)
     await message.answer(text, reply_markup=markup)
 
 
 @router.callback_query(F.data == "nav:explore")
 async def cb_explore_menu(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
     text, markup = await render_menu(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()
@@ -77,6 +86,8 @@ async def cb_explore_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("ex:"))
 async def cb_explore_go(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
     map_key = callback.data[3:]
     res = await explore_service.explore(callback.from_user.id, map_key)
     markup = _after_markup(map_key) if res["status"] == "ok" else main_menu()

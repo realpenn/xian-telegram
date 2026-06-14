@@ -5,6 +5,26 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 NEED_START = "道友尚未踏入仙途，请先发送 /start 测灵根、开启修行。"
+PRIVATE_ONLY = "养成诸事请移步私聊。群中暂且只留切磋、排行与宗门播报。"
+
+
+def is_private_chat(chat) -> bool:
+    chat_type = str(getattr(chat, "type", "")).lower()
+    return chat_type == "private" or chat_type.endswith(".private")
+
+
+async def guard_private_message(message) -> bool:
+    if is_private_chat(message.chat):
+        return False
+    await message.answer(PRIVATE_ONLY)
+    return True
+
+
+async def guard_private_callback(callback) -> bool:
+    if callback.message and is_private_chat(callback.message.chat):
+        return False
+    await callback.answer(PRIVATE_ONLY, show_alert=True)
+    return True
 
 
 def main_menu() -> InlineKeyboardMarkup:

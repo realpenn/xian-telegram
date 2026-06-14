@@ -8,7 +8,7 @@ import random
 
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label)
-from services import character
+from models import db
 
 FAIL_CULT_LOSS = 0.30
 
@@ -21,29 +21,50 @@ def big_success_rate(realm: int, root_bone: int, pill_bonus: float = 0.0) -> flo
 
 
 async def try_advance(user_id: int) -> dict:
-    char = await character.get(user_id)
-    cost = advance_cost(char.realm, char.stage)
-    if char.cultivation < cost:
-        return {"status": "need_cult", "need": cost - char.cultivation}
-    nxt = next_stage(char.realm, char.stage)
-    if nxt is None:
-        return {"status": "at_cap"}
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
+        char = await cur.fetchone()
+        await cur.close()
+        if not char:
+            return {"status": "missing"}
+        if char["seclusion_at"]:
+            return {"status": "in_seclusion"}
 
-    if is_big_breakthrough(char.realm, char.stage):
-        target = char.realm + 1
-        pill = BIG_BREAKTHROUGH[target]["pill"]
-        if await character.item_qty(user_id, pill) < 1:
-            return {"status": "need_pill", "pill": pill}
-        await character.add_item(user_id, pill, -1)
-        rate = big_success_rate(char.realm, char.root_bone)
-        trib = BIG_BREAKTHROUGH[target]["tribulation"]
-        if random.random() < rate:
-            await character.set_progress(user_id, nxt[0], nxt[1], char.cultivation - cost)
-            return {"status": "big_success", "rate": rate, "tribulation": trib,
-                    "label": realm_label(nxt[0], nxt[1])}
-        loss = int(char.cultivation * FAIL_CULT_LOSS)
-        await character.set_cultivation(user_id, char.cultivation - loss)
-        return {"status": "big_fail", "rate": rate, "tribulation": trib, "loss": loss}
+        cost = advance_cost(char["realm"], char["stage"])
+        if char["cultivation"] < cost:
+            return {"status": "need_cult", "need": cost - char["cultivation"]}
+        nxt = next_stage(char["realm"], char["stage"])
+        if nxt is None:
+            return {"status": "at_cap"}
 
-    await character.set_progress(user_id, nxt[0], nxt[1], char.cultivation - cost)
-    return {"status": "small_success", "label": realm_label(nxt[0], nxt[1])}
+        if is_big_breakthrough(char["realm"], char["stage"]):
+            target = char["realm"] + 1
+            pill = BIG_BREAKTHROUGH[target]["pill"]
+            cur = await conn.execute(
+                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, pill))
+            item = await cur.fetchone()
+            await cur.close()
+            if not item or item["qty"] < 1:
+                return {"status": "need_pill", "pill": pill}
+            await conn.execute(
+                "UPDATE inventory SET qty = MAX(0, qty - 1) "
+                "WHERE user_id=? AND item_key=?",
+                (user_id, pill))
+            rate = big_success_rate(char["realm"], char["root_bone"])
+            trib = BIG_BREAKTHROUGH[target]["tribulation"]
+            if random.random() < rate:
+                await conn.execute(
+                    "UPDATE characters SET realm=?, stage=?, cultivation=? WHERE user_id=?",
+                    (nxt[0], nxt[1], max(0, char["cultivation"] - cost), user_id))
+                return {"status": "big_success", "rate": rate, "tribulation": trib,
+                        "label": realm_label(nxt[0], nxt[1])}
+            loss = int(char["cultivation"] * FAIL_CULT_LOSS)
+            await conn.execute(
+                "UPDATE characters SET cultivation=? WHERE user_id=?",
+                (max(0, char["cultivation"] - loss), user_id))
+            return {"status": "big_fail", "rate": rate, "tribulation": trib, "loss": loss}
+
+        await conn.execute(
+            "UPDATE characters SET realm=?, stage=?, cultivation=? WHERE user_id=?",
+            (nxt[0], nxt[1], max(0, char["cultivation"] - cost), user_id))
+        return {"status": "small_success", "label": realm_label(nxt[0], nxt[1])}

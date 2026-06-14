@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import asynccontextmanager
 
 import aiosqlite
 
 _DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "xian.db")
 _conn = None
-_write_lock = asyncio.Lock()
+_write_lock = None
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -52,26 +53,35 @@ CREATE TABLE IF NOT EXISTS character_skills (
 
 
 async def init_db(path: str = None):
-    global _conn
+    global _conn, _write_lock
     db_path = path or _DB_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    if _conn is not None:
+        await _conn.close()
     _conn = await aiosqlite.connect(db_path)
     _conn.row_factory = aiosqlite.Row
+    _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
     await _conn.commit()
 
 
 async def close_db():
-    global _conn
+    global _conn, _write_lock
     if _conn is not None:
         await _conn.close()
         _conn = None
+    _write_lock = None
 
 
 def _c():
     assert _conn is not None, "DB 未初始化，请先 await init_db()"
     return _conn
+
+
+def _lock():
+    assert _write_lock is not None, "DB 未初始化，请先 await init_db()"
+    return _write_lock
 
 
 async def fetchone(sql, params=()):
@@ -89,6 +99,21 @@ async def fetchall(sql, params=()):
 
 
 async def execute(sql, params=()):
-    async with _write_lock:
+    async with _lock():
         await _c().execute(sql, params)
         await _c().commit()
+
+
+@asynccontextmanager
+async def transaction():
+    """串行化写事务；用于检查状态、扣资源、领奖励等原子流程。"""
+    async with _lock():
+        conn = _c()
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except Exception:
+            await conn.rollback()
+            raise
+        else:
+            await conn.commit()

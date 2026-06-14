@@ -5,7 +5,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
-from handlers.common import main_menu
+from handlers.common import guard_private_message, main_menu
 from services import character
 
 router = Router()
@@ -13,6 +13,8 @@ router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    if await guard_private_message(message):
+        return
     uid = message.from_user.id
     if await character.exists(uid):
         await message.answer("道友已在途中。发送 /me 查看道行，或点下方按钮。",

@@ -5,7 +5,8 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from handlers.common import NEED_START, main_menu, menu_with_breakthrough, show
+from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
+                             main_menu, menu_with_breakthrough, show)
 from services import breakthrough, character, cultivation
 
 router = Router()
@@ -17,6 +18,8 @@ async def do_cultivate(user_id: int):
         return NEED_START, None
     if char.seclusion_at:
         res = await cultivation.collect(user_id)
+        if res["status"] != "collected":
+            return "闭关状态已变，请稍后再试。", main_menu()
         lines = [f"🧘 出关！闭关 {res['minutes']} 分钟，修为精进 +{res['gained']}。",
                  f"修为 {res['cultivation']}/{res['cost']}"]
         if res["can_advance"]:
@@ -32,6 +35,10 @@ def _bt_text(res: dict) -> str:
     s = res["status"]
     if s == "need_cult":
         return f"修为尚浅，还差 {res['need']} 方可冲关。且去闭关或历练。"
+    if s == "in_seclusion":
+        return "道友仍在闭关，不宜分心冲关。且先出关收功。"
+    if s == "missing":
+        return NEED_START
     if s == "at_cap":
         return "道友已臻元婴圆满，乃此界之绝巅（化神之境，留待来日开启）。"
     if s == "need_pill":
@@ -50,12 +57,16 @@ def _bt_text(res: dict) -> str:
 
 @router.message(Command("cultivate"))
 async def cmd_cultivate(message: Message):
+    if await guard_private_message(message):
+        return
     text, markup = await do_cultivate(message.from_user.id)
     await message.answer(text, reply_markup=markup)
 
 
 @router.callback_query(F.data == "nav:cultivate")
 async def cb_cultivate(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
     text, markup = await do_cultivate(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()
@@ -63,6 +74,8 @@ async def cb_cultivate(callback: CallbackQuery):
 
 @router.callback_query(F.data == "bt:do")
 async def cb_breakthrough(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
     res = await breakthrough.try_advance(callback.from_user.id)
     await show(callback, _bt_text(res), main_menu())
     await callback.answer()

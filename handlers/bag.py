@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
 from config.items import item_name
-from handlers.common import NEED_START, main_menu, show
+from handlers.common import NEED_START, guard_private_callback, guard_private_message, main_menu, show
 from services import character
 
 router = Router()
@@ -28,12 +28,16 @@ async def render_bag(user_id: int):
 
 @router.message(Command("bag"))
 async def cmd_bag(message: Message):
+    if await guard_private_message(message):
+        return
     text, markup = await render_bag(message.from_user.id)
     await message.answer(text, reply_markup=markup)
 
 
 @router.callback_query(F.data == "nav:bag")
 async def cb_bag(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
     text, markup = await render_bag(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()

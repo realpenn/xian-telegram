@@ -23,16 +23,19 @@ def _combatant_from_mob(src) -> Combatant:
 
 
 async def explore(user_id: int, map_key: str) -> dict:
-    char = await character.get(user_id)
     m = MAPS.get(map_key)
     if not m:
         return {"status": "bad_map"}
+    char = await character.get(user_id)
+    if not char:
+        return {"status": "missing"}
     if char.realm < m["realm"]:
         return {"status": "locked", "need": realm_label(m["realm"], 0)}
     cost = m["stamina"]
-    if char.stamina < cost:
-        return {"status": "no_stamina", "need": cost, "have": char.stamina}
-    await character.spend_stamina(user_id, cost)
+    reserved = await character.reserve_stamina_for_action(user_id, cost)
+    if reserved["status"] != "ok":
+        return reserved
+    char = reserved["char"]
 
     rng = random.Random()
     st = await character.stats(char)
@@ -50,11 +53,8 @@ async def explore(user_id: int, map_key: str) -> dict:
         stone = rng.randint(*m["stone"]) * mult
         cult = m["cult"] * mult
         drops = _roll_drops(m, rng)
-        await character.add_stone(user_id, stone)
-        await character.set_cultivation(user_id, char.cultivation + cult)
-        for k, q in drops.items():
-            await character.add_item(user_id, k, q)
+        await character.grant_reward(user_id, stone, cult, drops)
         reward = {"stone": stone, "cult": cult, "drops": drops}
 
     return {"status": "ok", "win": win, "is_boss": is_boss, "mob": mob_src["name"],
-            "log": result["log"], "reward": reward, "stamina_left": max(0, char.stamina - cost)}
+            "log": result["log"], "reward": reward, "stamina_left": reserved["stamina_left"]}

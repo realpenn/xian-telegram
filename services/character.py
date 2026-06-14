@@ -80,6 +80,24 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
 COMBAT_MOD_KEYS = ("lifesteal_pct", "reflect_pct", "crit_resist", "pierce", "initiative")
 
 
+def active_temporary_buffs(state: dict, now: int = None) -> list:
+    now = int(time.time()) if now is None else now
+    buffs = state.get("buffs") or {}
+    active = []
+    for buff in buffs.values():
+        if int(buff.get("until", 0)) > now:
+            active.append(buff)
+    return active
+
+
+def temporary_seclusion_pct(state: dict, now: int = None) -> float:
+    pct = 0.0
+    for buff in active_temporary_buffs(state, now):
+        effects = buff.get("effects") or {}
+        pct += float(effects.get("seclusion_pct", 0))
+    return pct
+
+
 async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
@@ -159,6 +177,7 @@ async def stats(char: Character) -> dict:
                 base[stat_key] = int(base.get(stat_key, 0) * (1 + val))
             else:
                 base[key] = base.get(key, 0) + val
+    _apply_temporary_stat_buffs(base, char.debuff_json)
     welfare = await sect_welfare(char.user_id)
     if welfare["stat_pct"]:
         for key in R.STAT_KEYS:
@@ -182,6 +201,17 @@ def _apply_equipment_bonus(base: dict, bonus: dict):
             base[key] = base.get(key, 0) + val
     for stat_key, pct in deferred:
         base[stat_key] = int(base.get(stat_key, 0) * (1 + pct))
+
+
+def _apply_temporary_stat_buffs(base: dict, state: dict):
+    for buff in active_temporary_buffs(state):
+        for key, val in (buff.get("effects") or {}).items():
+            if key.endswith("_pct"):
+                stat_key = key[:-4]
+                if stat_key in R.STAT_KEYS:
+                    base[stat_key] = int(base.get(stat_key, 0) * (1 + float(val)))
+            elif key in R.STAT_KEYS:
+                base[key] = base.get(key, 0) + int(val)
 
 
 def equipment_bonus(inst: dict) -> dict:
@@ -494,7 +524,10 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         stamina, stamina_at = _settled_stamina(row, now, welfare)
         gained = settle.seclusion_gain(
             row["realm"], row["seclusion_at"], now, row["root_bone"],
-            place_factor=1 + welfare["seclusion_pct"],
+            place_factor=(
+                (1 + welfare["seclusion_pct"])
+                * (1 + temporary_seclusion_pct(json.loads(row["debuff_json"] or "{}"), now))
+            ),
             offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
         new_cult = row["cultivation"] + gained
         await conn.execute(

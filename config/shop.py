@@ -6,6 +6,8 @@ SHOP_ITEMS = {
     "玄铁矿": {"price": 24, "realm": 1},
     "兽皮": {"price": 16, "realm": 0},
     "妖丹": {"price": 55, "realm": 1},
+    "虎力丹": {"price": 120, "realm": 0},
+    "凝神丹": {"price": 120, "realm": 0},
     "筑基丹": {"price": 260, "realm": 0},
     "金丹": {"price": 900, "realm": 1},
     "元婴丹": {"price": 2400, "realm": 2},

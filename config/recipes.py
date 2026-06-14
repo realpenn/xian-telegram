@@ -12,6 +12,16 @@ RECIPES = {
         "stone": 30, "materials": {"灵草": 2, "妖丹": 1},
         "output": {"kind": "item", "key": "补灵丹", "qty": 1}, "default": True,
     },
+    "might_pill": {
+        "name": "虎力丹", "type": "alchemy", "realm": 1, "seconds": 20,
+        "stone": 35, "materials": {"灵草": 2, "兽皮": 1},
+        "output": {"kind": "item", "key": "虎力丹", "qty": 1}, "default": True,
+    },
+    "focus_pill": {
+        "name": "凝神丹", "type": "alchemy", "realm": 1, "seconds": 20,
+        "stone": 35, "materials": {"灵草": 3},
+        "output": {"kind": "item", "key": "凝神丹", "qty": 1}, "default": True,
+    },
     "foundation_pill": {
         "name": "筑基丹", "type": "alchemy", "realm": 1, "seconds": 30,
         "stone": 80, "materials": {"灵草": 5, "妖丹": 2},

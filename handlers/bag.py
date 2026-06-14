@@ -52,6 +52,9 @@ def _result_text(res: dict) -> str:
         return f"炼化{res['item']}，根骨 {res['old']} → {res['new']}。"
     if s == "root_cap":
         return f"根骨已臻当前上限 {res['cap']}。"
+    if s == "buff_ok":
+        minutes = max(1, res["duration"] // 60)
+        return f"服下{res['item']}，药力流转，增益持续 {minutes} 分钟。"
     if s == "recipe_ok":
         return f"研读{res['item']}，已掌握「{res['recipe']}」。"
     if s == "known_recipe":

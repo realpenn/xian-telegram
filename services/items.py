@@ -32,11 +32,17 @@ async def use(user_id: int, item_key: str, now: int = None) -> dict:
             return {"status": "missing"}
         if item.get("type") == "recipe":
             return await _learn_recipe(conn, user_id, item_key, item)
+        if item.get("use") == "buff":
+            return await _use_buff_pill(conn, user_id, row, item_key, item, now)
         if item_key == "补灵丹":
             return await _use_stamina_pill(conn, user_id, row, now)
         if item_key == "疗伤丹":
+            state = json.loads(row["debuff_json"] or "{}")
+            state.pop("unstable_until", None)
             await _consume(conn, user_id, item_key)
-            await conn.execute("UPDATE characters SET debuff_json='{}' WHERE user_id=?", (user_id,))
+            await conn.execute(
+                "UPDATE characters SET debuff_json=? WHERE user_id=?",
+                (json.dumps(state, ensure_ascii=False), user_id))
             return {"status": "healed", "item": item_name(item_key)}
         if item_key in ("天材地宝", "洗髓丹"):
             gain = 1 if item_key == "天材地宝" else 3
@@ -75,6 +81,28 @@ async def _learn_recipe(conn, user_id: int, item_key: str, item: dict) -> dict:
         "INSERT OR IGNORE INTO recipes_known(user_id, recipe_key) VALUES(?,?)",
         (user_id, recipe_key))
     return {"status": "recipe_ok", "item": item_name(item_key), "recipe": recipe["name"]}
+
+
+async def _use_buff_pill(conn, user_id: int, row, item_key: str, item: dict, now: int) -> dict:
+    effects = dict(item.get("buff") or {})
+    duration = int(item.get("duration", 0))
+    if not effects or duration <= 0:
+        return {"status": "not_usable", "item": item_name(item_key)}
+    state = json.loads(row["debuff_json"] or "{}")
+    buffs = state.setdefault("buffs", {})
+    until = now + duration
+    buffs[item_key] = {"until": until, "effects": effects}
+    await _consume(conn, user_id, item_key)
+    await conn.execute(
+        "UPDATE characters SET debuff_json=? WHERE user_id=?",
+        (json.dumps(state, ensure_ascii=False), user_id))
+    return {
+        "status": "buff_ok",
+        "item": item_name(item_key),
+        "effects": effects,
+        "duration": duration,
+        "until": until,
+    }
 
 
 async def _use_stamina_pill(conn, user_id: int, row, now: int) -> dict:

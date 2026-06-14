@@ -1,10 +1,13 @@
+import json
+
 import pytest
 import pytest_asyncio
 
 from config import realms as R
 from handlers.common import action_callback_data, consume_action_callback
 from models import db
-from services import breakthrough, character, crafting, explore, items, pvp, sect, shop, world_boss
+from services import (breakthrough, character, crafting, explore, items, pvp, sect, settle,
+                      shop, world_boss)
 
 
 @pytest_asyncio.fixture
@@ -269,6 +272,44 @@ async def test_consumables_restore_clear_debuff_and_raise_root(temp_db):
     assert after.stamina > 0
     assert after.debuff_json == {}
     assert after.root_bone == before.root_bone + 1
+
+
+@pytest.mark.asyncio
+async def test_temporary_pill_buffs_affect_stats_and_expire(temp_db):
+    uid = 4022
+    await character.create(uid, "tester")
+    base = await character.stats(await character.get(uid))
+    await character.add_item(uid, "虎力丹", 1)
+
+    res = await items.use(uid, "虎力丹")
+    buffed = await character.stats(await character.get(uid))
+    qty = await character.item_qty(uid, "虎力丹")
+
+    assert res["status"] == "buff_ok"
+    assert qty == 0
+    assert buffed["atk"] > base["atk"]
+
+    expired = {"buffs": {"虎力丹": {"until": 1, "effects": {"atk_pct": 0.10}}}}
+    await db.execute(
+        "UPDATE characters SET debuff_json=? WHERE user_id=?",
+        (json.dumps(expired, ensure_ascii=False), uid))
+
+    assert (await character.stats(await character.get(uid)))["atk"] == base["atk"]
+
+
+@pytest.mark.asyncio
+async def test_temporary_pill_buff_improves_seclusion_gain(temp_db):
+    uid = 4023
+    await character.create(uid, "tester")
+    char = await character.get(uid)
+    await character.add_item(uid, "凝神丹", 1)
+    await items.use(uid, "凝神丹")
+
+    await character.start_seclusion(uid, now=1000)
+    res = await character.collect_seclusion(uid, now=4600)
+    without_buff = settle.seclusion_gain(char.realm, 1000, 4600, char.root_bone)
+
+    assert res["gained"] > without_buff
 
 
 @pytest.mark.asyncio

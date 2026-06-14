@@ -17,6 +17,10 @@ ITEMS = {
     "天材地宝": {"name": "天材地宝", "type": "material", "sell": 80},
     "疗伤丹": {"name": "疗伤丹",   "type": "pill", "sell": 20},
     "补灵丹": {"name": "补灵丹",   "type": "pill", "sell": 20},
+    "虎力丹": {"name": "虎力丹",   "type": "pill", "sell": 35, "use": "buff",
+             "buff": {"atk_pct": 0.10}, "duration": 3600},
+    "凝神丹": {"name": "凝神丹",   "type": "pill", "sell": 35, "use": "buff",
+             "buff": {"seclusion_pct": 0.20}, "duration": 3600},
     "洗髓丹": {"name": "洗髓丹",   "type": "pill", "sell": 120},
     "筑基丹": {"name": "筑基丹",   "type": "pill", "sell": 60},
     "金丹":   {"name": "金丹",     "type": "pill", "sell": 180},
@@ -57,4 +61,8 @@ def sell_price(key: str) -> int:
 
 def is_usable(key: str) -> bool:
     item = ITEMS.get(key, {})
-    return key in {"疗伤丹", "补灵丹", "洗髓丹", "天材地宝"} or item.get("type") == "recipe"
+    return (
+        key in {"疗伤丹", "补灵丹", "洗髓丹", "天材地宝"}
+        or item.get("use") == "buff"
+        or item.get("type") == "recipe"
+    )

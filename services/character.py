@@ -579,6 +579,7 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         )
         gained, remainder_units = settle.seclusion_gain_with_remainder(
             row["realm"], row["stage"], row["seclusion_at"], now,
+            root_bone=row["root_bone"],
             place_factor=place_factor,
             remainder_units=_seclusion_remainder(state, row["realm"], row["stage"]),
             offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])

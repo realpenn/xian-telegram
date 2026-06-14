@@ -49,6 +49,12 @@ def test_seclusion_rate_uses_current_stage_cost():
     assert high > low
 
 
+def test_seclusion_root_bone_scales_as_buff():
+    low = settle.seclusion_gain(0, 0, 0, 3600, root_bone=40)
+    high = settle.seclusion_gain(0, 0, 0, 3600, root_bone=80)
+    assert high > low
+
+
 def test_seclusion_half_hour_is_below_first_advance_cost():
     assert settle.seclusion_gain(0, 0, 0, 1800) < R.advance_cost(0, 0)
 

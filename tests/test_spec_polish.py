@@ -367,6 +367,7 @@ async def test_split_seclusion_sessions_accumulate_to_one_stage(temp_db):
     uid = 4028
     await character.create(uid, "tester")
     await character.set_progress(uid, 0, 3, 0)
+    await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
     cost = R.advance_cost(0, 3)
 
     await character.start_seclusion(uid, now=1000)

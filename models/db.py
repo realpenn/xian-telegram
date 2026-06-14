@@ -14,7 +14,8 @@ from contextlib import asynccontextmanager
 import aiosqlite
 
 _DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "xian.db")
-_conn = None
+_conn = None          # 写连接：事务 / 写入，经 _write_lock 串行化
+_read_conn = None     # 只读连接：WAL 快照读，永不取写锁，杜绝脏读与读-写死锁
 _write_lock = None
 
 SCHEMA = """
@@ -151,11 +152,13 @@ CREATE TABLE IF NOT EXISTS callback_tokens (
 
 
 async def init_db(path: str = None):
-    global _conn, _write_lock
+    global _conn, _read_conn, _write_lock
     db_path = path or _DB_PATH
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     if _conn is not None:
         await _conn.close()
+    if _read_conn is not None:
+        await _read_conn.close()
     _conn = await aiosqlite.connect(db_path)
     _conn.row_factory = aiosqlite.Row
     _write_lock = asyncio.Lock()
@@ -168,19 +171,31 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _conn.commit()
+    # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
+    _read_conn = await aiosqlite.connect(db_path)
+    _read_conn.row_factory = aiosqlite.Row
+    await _read_conn.execute("PRAGMA query_only=ON;")
 
 
 async def close_db():
-    global _conn, _write_lock
+    global _conn, _read_conn, _write_lock
     if _conn is not None:
         await _conn.close()
         _conn = None
+    if _read_conn is not None:
+        await _read_conn.close()
+        _read_conn = None
     _write_lock = None
 
 
 def _c():
     assert _conn is not None, "DB 未初始化，请先 await init_db()"
     return _conn
+
+
+def _rc():
+    assert _read_conn is not None, "DB 未初始化，请先 await init_db()"
+    return _read_conn
 
 
 def _lock():
@@ -197,14 +212,14 @@ async def _ensure_column(conn, table: str, column: str, definition: str):
 
 
 async def fetchone(sql, params=()):
-    cur = await _c().execute(sql, params)
+    cur = await _rc().execute(sql, params)
     row = await cur.fetchone()
     await cur.close()
     return row
 
 
 async def fetchall(sql, params=()):
-    cur = await _c().execute(sql, params)
+    cur = await _rc().execute(sql, params)
     rows = await cur.fetchall()
     await cur.close()
     return rows

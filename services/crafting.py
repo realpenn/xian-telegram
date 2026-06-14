@@ -8,6 +8,7 @@ import time
 from config.items import ITEMS, item_name
 from config.recipes import ACCELERATE_STONE_PER_MINUTE, RECIPES
 from models import db
+from services import character
 
 
 def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
@@ -24,6 +25,23 @@ async def active_job(user_id: int):
     return await db.fetchone(
         "SELECT * FROM crafting_jobs WHERE user_id=? AND status='active' ORDER BY id LIMIT 1",
         (user_id,))
+
+
+async def known_recipe_keys(user_id: int) -> set:
+    rows = await db.fetchall("SELECT recipe_key FROM recipes_known WHERE user_id=?", (user_id,))
+    return {row["recipe_key"] for row in rows}
+
+
+async def available_recipes(user_id: int):
+    char = await character.get(user_id)
+    if not char:
+        return []
+    known = await known_recipe_keys(user_id)
+    return [
+        (key, recipe)
+        for key, recipe in RECIPES.items()
+        if char.realm >= recipe["realm"] and (recipe.get("default", False) or key in known)
+    ]
 
 
 async def collect_ready(user_id: int, now: int = None) -> list:
@@ -85,6 +103,14 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
             return {"status": "in_seclusion"}
         if char["realm"] < recipe["realm"]:
             return {"status": "locked"}
+        if not recipe.get("default", False):
+            cur = await conn.execute(
+                "SELECT 1 FROM recipes_known WHERE user_id=? AND recipe_key=?",
+                (user_id, recipe_key))
+            known = await cur.fetchone()
+            await cur.close()
+            if not known:
+                return {"status": "need_recipe"}
         cur = await conn.execute(
             "SELECT 1 FROM crafting_jobs WHERE user_id=? AND status='active'", (user_id,))
         busy = await cur.fetchone()

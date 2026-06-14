@@ -5,16 +5,18 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from handlers.common import is_private_chat, show
+from handlers.common import action_callback_data, consume_action_callback, is_private_chat, show
 from config.bosses import WORLD_BOSSES
 from services import world_boss
 
 router = Router()
 
 
-def _markup() -> InlineKeyboardMarkup:
+async def _markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⚔️ 挑战 Boss", callback_data="boss:hit"),
+        [InlineKeyboardButton(
+            text="⚔️ 挑战 Boss",
+            callback_data=await action_callback_data(None, "boss:hit")),
          InlineKeyboardButton(text="🐲 查看战况", callback_data="boss:status")]
     ])
 
@@ -73,18 +75,20 @@ async def cmd_boss(message: Message):
     await world_boss.remember_chat(message.chat.id, message.chat.title)
     await world_boss.ensure_active(message.chat.id)
     res = await world_boss.status(message.chat.id)
-    await message.answer(_status_text(res), reply_markup=_markup())
+    await message.answer(_status_text(res), reply_markup=await _markup())
 
 
 @router.callback_query(F.data == "boss:status")
 async def cb_boss_status(callback: CallbackQuery):
     res = await world_boss.status(callback.message.chat.id)
-    await show(callback, _status_text(res), _markup())
+    await show(callback, _status_text(res), await _markup())
     await callback.answer()
 
 
-@router.callback_query(F.data == "boss:hit")
+@router.callback_query(F.data.startswith("boss:hit:"))
 async def cb_boss_hit(callback: CallbackQuery):
+    if await consume_action_callback(callback) != "boss:hit":
+        return
     res = await world_boss.challenge(callback.message.chat.id, callback.from_user.id)
-    await show(callback, _challenge_text(res), _markup())
+    await show(callback, _challenge_text(res), await _markup())
     await callback.answer()

@@ -17,14 +17,17 @@ ITEMS = {
     "天材地宝": {"name": "天材地宝", "type": "material", "sell": 80},
     "疗伤丹": {"name": "疗伤丹",   "type": "pill", "sell": 20},
     "补灵丹": {"name": "补灵丹",   "type": "pill", "sell": 20},
+    "洗髓丹": {"name": "洗髓丹",   "type": "pill", "sell": 120},
     "筑基丹": {"name": "筑基丹",   "type": "pill", "sell": 60},
     "金丹":   {"name": "金丹",     "type": "pill", "sell": 180},
     "元婴丹": {"name": "元婴丹",   "type": "pill", "sell": 500},
     "归元心法残页": {"name": "归元心法残页", "type": "page", "skill": "归元心法", "need": 3},
     "烈火诀残页": {"name": "烈火诀残页", "type": "page", "skill": "烈火诀", "need": 3},
     "回春术残页": {"name": "回春术残页", "type": "page", "skill": "回春术", "need": 3},
+    "洗髓丹丹方": {"name": "洗髓丹丹方", "type": "recipe", "recipe": "marrow_pill"},
     "玄铁剑图纸": {"name": "玄铁剑图纸", "type": "recipe", "recipe": "forge_sword"},
     "青木甲图纸": {"name": "青木甲图纸", "type": "recipe", "recipe": "forge_armor"},
+    "聚灵佩图纸": {"name": "聚灵佩图纸", "type": "recipe", "recipe": "forge_accessory"},
 }
 
 
@@ -50,3 +53,8 @@ def equipment_slot(key: str) -> str:
 
 def sell_price(key: str) -> int:
     return int(ITEMS.get(key, {}).get("sell", 0))
+
+
+def is_usable(key: str) -> bool:
+    item = ITEMS.get(key, {})
+    return key in {"疗伤丹", "补灵丹", "洗髓丹", "天材地宝"} or item.get("type") == "recipe"

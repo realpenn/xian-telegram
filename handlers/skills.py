@@ -7,7 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import ITEMS, equipment_slot, item_name
 from config.skills import MIND_SLOT, skill_name
-from handlers.common import NEED_START, guard_private_callback, guard_private_message, main_menu, show
+from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
+                             guard_private_callback, guard_private_message, main_menu, show)
 from services import character
 
 router = Router()
@@ -39,7 +40,8 @@ async def render_skills(user_id: int):
             lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
             if not inst["equipped_slot"] and equipment_slot(inst["base_key"]):
                 rows.append([InlineKeyboardButton(
-                    text=f"装备 {item_name(inst['base_key'])}", callback_data=f"equip:{inst['id']}")])
+                    text=f"装备 {item_name(inst['base_key'])}",
+                    callback_data=await action_callback_data(user_id, f"equip:{inst['id']}"))])
     else:
         lines.append("尚无法宝实例，可由炼器或秘境获得。")
 
@@ -48,7 +50,8 @@ async def render_skills(user_id: int):
         item = ITEMS.get(key, {})
         if item.get("type") == "page" and qty >= item.get("need", 999):
             page_buttons.append([InlineKeyboardButton(
-                text=f"领悟 {skill_name(item['skill'])}", callback_data=f"learn:{key}")])
+                text=f"领悟 {skill_name(item['skill'])}",
+                callback_data=await action_callback_data(user_id, f"learn:{key}"))])
     if page_buttons:
         lines.append("残页已足，可领悟新功法。")
         rows += page_buttons
@@ -93,7 +96,10 @@ async def cb_skills(callback: CallbackQuery):
 async def cb_equip(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
-    res = await character.equip_instance(callback.from_user.id, int(callback.data[6:]))
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("equip:"):
+        return
+    res = await character.equip_instance(callback.from_user.id, int(action[6:]))
     await show(callback, _result_text(res), main_menu())
     await callback.answer()
 
@@ -102,6 +108,9 @@ async def cb_equip(callback: CallbackQuery):
 async def cb_learn(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
-    res = await character.learn_skill_from_pages(callback.from_user.id, callback.data[6:])
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("learn:"):
+        return
+    res = await character.learn_skill_from_pages(callback.from_user.id, action[6:])
     await show(callback, _result_text(res), main_menu())
     await callback.answer()

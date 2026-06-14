@@ -7,7 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import item_name
 from config.sects import CREATE_STONE_COST, SECT_SHOP
-from handlers.common import NEED_START, main_menu, show
+from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
+                             main_menu, show)
 from services import sect
 
 router = Router()
@@ -32,7 +33,9 @@ async def render_sect(user_id: int):
         ]
         lines += [f"{m['role']} {m['username'] or m['user_id']} · 贡献 {m['contribution']}" for m in members]
         text = "\n".join(lines)
-        rows.append([InlineKeyboardButton(text="📜 宗门任务", callback_data="sect:task")])
+        rows.append([InlineKeyboardButton(
+            text="📜 宗门任务",
+            callback_data=await action_callback_data(user_id, "sect:task"))])
         rows.append([InlineKeyboardButton(text="🏪 宗门商店", callback_data="sect:shop")])
     rows += main_menu().inline_keyboard
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
@@ -102,8 +105,10 @@ async def cb_sect(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data == "sect:task")
+@router.callback_query(F.data.startswith("sect:task:"))
 async def cb_task(callback: CallbackQuery):
+    if await consume_action_callback(callback) != "sect:task":
+        return
     await show(callback, _result_text(await sect.task(callback.from_user.id)), main_menu())
     await callback.answer()
 
@@ -113,7 +118,7 @@ async def cb_shop(callback: CallbackQuery):
     rows = [
         [InlineKeyboardButton(
             text=f"{item_name(key)}（贡献 {good['contribution']}）",
-            callback_data=f"sect:buy:{key}")]
+            callback_data=await action_callback_data(callback.from_user.id, f"sect:buy:{key}"))]
         for key, good in SECT_SHOP.items()
     ]
     rows += main_menu().inline_keyboard
@@ -123,6 +128,9 @@ async def cb_shop(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("sect:buy:"))
 async def cb_buy(callback: CallbackQuery):
-    key = callback.data.split(":", 2)[2]
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("sect:buy:"):
+        return
+    key = action.split(":", 2)[2]
     await show(callback, _result_text(await sect.redeem(callback.from_user.id, key)), main_menu())
     await callback.answer()

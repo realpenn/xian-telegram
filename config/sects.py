@@ -7,9 +7,12 @@ TASK_CONTRIBUTION = 10
 TASK_STONE_REWARD = 30
 
 SECT_SHOP = {
+    "归元心法残页": {"contribution": 20, "qty": 1},
     "烈火诀残页": {"contribution": 20, "qty": 1},
     "回春术残页": {"contribution": 20, "qty": 1},
     "玄铁剑图纸": {"contribution": 35, "qty": 1},
+    "洗髓丹丹方": {"contribution": 45, "qty": 1},
+    "聚灵佩图纸": {"contribution": 45, "qty": 1},
 }
 
 

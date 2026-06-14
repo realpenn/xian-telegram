@@ -7,7 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.dungeons import DUNGEONS
 from config.items import item_name
-from handlers.common import NEED_START, guard_private_callback, guard_private_message, main_menu, show
+from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
+                             guard_private_callback, guard_private_message, main_menu, show)
 from services import character, dungeon
 
 router = Router()
@@ -23,7 +24,9 @@ async def render_dungeon(user_id: int):
         state = "可入" if char.realm >= d["realm"] else "未解锁"
         lines.append(f"{d['name']}：{d['layers']} 层，每层精力 {d['stamina']}（{state}）")
         if char.realm >= d["realm"]:
-            rows.append([InlineKeyboardButton(text=f"进入 {d['name']}", callback_data=f"dg:{key}")])
+            rows.append([InlineKeyboardButton(
+                text=f"进入 {d['name']}",
+                callback_data=await action_callback_data(user_id, f"dg:{key}"))])
     rows += main_menu().inline_keyboard
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -77,6 +80,9 @@ async def cb_dungeon(callback: CallbackQuery):
 async def cb_dungeon_run(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
-    res = await dungeon.run(callback.from_user.id, callback.data[3:])
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("dg:"):
+        return
+    res = await dungeon.run(callback.from_user.id, action[3:])
     await show(callback, _result_text(res), main_menu())
     await callback.answer()

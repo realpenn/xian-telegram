@@ -43,7 +43,7 @@ async def render_me(user_id: int):
     if int(char.debuff_json.get("unstable_until", 0)) > int(time.time()):
         lines.append("⚠️ 道基不稳：法身六维暂降。")
     can_advance = char.cultivation >= cost and not char.seclusion_at
-    return "\n".join(lines), menu_with_breakthrough(can_advance)
+    return "\n".join(lines), await menu_with_breakthrough(user_id, can_advance)
 
 
 @router.message(Command("me"))

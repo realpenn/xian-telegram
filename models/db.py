@@ -137,6 +137,13 @@ CREATE TABLE IF NOT EXISTS bot_chats (
     title         TEXT,
     last_seen_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS callback_tokens (
+    token        TEXT PRIMARY KEY,
+    user_id      INTEGER,
+    action       TEXT NOT NULL,
+    created_at   INTEGER NOT NULL,
+    consumed_at  INTEGER
+);
 """
 
 

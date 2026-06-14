@@ -41,6 +41,7 @@ async def _active_row(conn, chat_id: int, now: int):
     await cur.close()
     if row and row["expire_at"] <= now:
         await conn.execute("UPDATE world_boss SET status='expired' WHERE id=?", (row["id"],))
+        await _distribute(conn, row["id"], WORLD_BOSSES[row["boss_key"]])
         return None
     return row
 

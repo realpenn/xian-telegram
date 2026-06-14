@@ -41,8 +41,8 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
             return {"status": "missing"}
         if row["realm"] < d["realm"]:
             return {"status": "locked", "need": R.realm_label(d["realm"], 0)}
-        stamina, stamina_at = settle.regen_stamina(
-            row["stamina"], row["stamina_at"], R.STAMINA_CAP[row["realm"]], now)
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(row, now, welfare)
         if row["seclusion_at"]:
             await conn.execute(
                 "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",

@@ -9,8 +9,8 @@ def _mob(name, hp, atk, df, spd, crit, skills=("普攻",)):
 
 DUNGEONS = {
     "qingyun": {
-        "name": "青云秘境", "realm": 2, "layers": 5, "stamina": 20,
-        "stone": (180, 300), "cult": 1200,
+        "name": "青云秘境", "realm": 2, "layers": 5, "stamina": 50,
+        "stone": (180, 300), "cult": 300,
         "mobs": [
             _mob("秘境石傀", 4200, 360, 260, 100, 35),
             _mob("青云剑影", 3600, 430, 190, 150, 55, ("普攻", "快剑斩")),

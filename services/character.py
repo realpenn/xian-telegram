@@ -18,6 +18,7 @@ SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
 ROOT_BONE_MIN = 40
 ROOT_BONE_MAX = 80
+AUTO_SECLUSION_IDLE_SECONDS = 3600
 
 
 @dataclass
@@ -109,6 +110,36 @@ async def touch_user(user_id: int, username: str, now: int = None):
         (username, now, user_id))
 
 
+async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
+    async with db.transaction() as conn:
+        cur = await conn.execute("SELECT * FROM users WHERE tg_user_id=?", (user_id,))
+        user = await cur.fetchone()
+        await cur.close()
+        if not user:
+            return {"status": "missing"}
+
+        auto_started = False
+        started_at = None
+        row = await _select_character(conn, user_id)
+        if row and not row["seclusion_at"]:
+            last_seen = int(user["last_seen_at"] or user["created_at"] or now)
+            if now - last_seen >= AUTO_SECLUSION_IDLE_SECONDS:
+                started_at = last_seen + AUTO_SECLUSION_IDLE_SECONDS
+                welfare = await _sect_welfare(conn, user_id)
+                stamina, stamina_at = _settled_stamina(row, started_at, welfare)
+                await conn.execute(
+                    "UPDATE characters SET stamina=?, stamina_at=?, seclusion_at=? "
+                    "WHERE user_id=?",
+                    (stamina, stamina_at, started_at, user_id))
+                auto_started = True
+
+        await conn.execute(
+            "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
+            (username, now, user_id))
+        return {"status": "ok", "auto_seclusion": auto_started, "started_at": started_at}
+
+
 def roll_root_bone(rng=random) -> int:
     return max(ROOT_BONE_MIN, min(ROOT_BONE_MAX, int(round(rng.gauss(60, 9)))))
 
@@ -142,10 +173,14 @@ async def create(user_id: int, username: str) -> Character:
 
 
 async def get(user_id: int):
+    return await get_at(user_id)
+
+
+async def get_at(user_id: int, now: int = None):
     row = await db.fetchone("SELECT * FROM characters WHERE user_id=?", (user_id,))
     if not row:
         return None
-    now = int(time.time())
+    now = int(time.time()) if now is None else now
     welfare = await sect_welfare(user_id)
     cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
     new_stam, new_at = settle.regen_stamina(row["stamina"], row["stamina_at"], cap, now)

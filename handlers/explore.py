@@ -21,12 +21,23 @@ async def render_menu(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
+    active = await explore_service.active_run(user_id)
+    if active:
+        rows = [[InlineKeyboardButton(
+            text="领取结算" if active["status"] == "ready" else "刷新进度",
+            callback_data=await action_callback_data(user_id, "ex:collect"))]]
+        rows += main_menu().inline_keyboard
+        if active["status"] == "ready":
+            text = f"⚔️ {active['map']} 历练已完成，可领取结算。"
+        else:
+            text = f"⚔️ 正在 {active['map']} 历练，约 {_minutes(active['remaining'])} 后归来。"
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
     welfare = await character.sect_welfare(user_id)
     cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
     rows = []
     for key, m in maps_for_realm(char.realm):
         rows.append([InlineKeyboardButton(
-            text=f"{m['name']}（精力{m['stamina']}）",
+            text=f"{m['name']}（精力{m['stamina']}，约10分钟）",
             callback_data=await action_callback_data(user_id, f"ex:{key}"))])
     rows += main_menu().inline_keyboard
     text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n择一处历练之地，斩妖夺宝："
@@ -42,8 +53,32 @@ async def _after_markup(user_id: int, map_key: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def _active_markup(user_id: int) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text="领取 / 刷新历练",
+        callback_data=await action_callback_data(user_id, "ex:collect"))]]
+    rows += main_menu().inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _minutes(seconds: int) -> str:
+    minutes = max(1, (seconds + 59) // 60)
+    return f"{minutes} 分钟"
+
+
 def _result_text(res: dict) -> str:
     s = res["status"]
+    if s == "started":
+        return (
+            f"⚔️ 已前往 {res['map']} 历练，预计 {_minutes(res['seconds'])} 后归来。\n"
+            f"⚡ 精力余 {res['stamina_left']}"
+        )
+    if s == "pending":
+        return f"⚔️ 正在 {res['map']} 历练，约 {_minutes(res['remaining'])} 后归来。"
+    if s == "ready":
+        return f"⚔️ {res['map']} 历练已完成，请领取结算。"
+    if s == "no_active":
+        return "当前没有正在进行的历练。"
     if s == "locked":
         return f"此地凶险，需修为至 {res['need']} 方可踏足。"
     if s == "in_seclusion":
@@ -96,8 +131,15 @@ async def cb_explore_go(callback: CallbackQuery):
     action = await consume_action_callback(callback)
     if not action or not action.startswith("ex:"):
         return
-    map_key = action[3:]
-    res = await explore_service.explore(callback.from_user.id, map_key)
-    markup = await _after_markup(callback.from_user.id, map_key) if res["status"] == "ok" else main_menu()
+    if action == "ex:collect":
+        res = await explore_service.collect(callback.from_user.id)
+    else:
+        res = await explore_service.start(callback.from_user.id, action[3:])
+    if res["status"] == "ok":
+        markup = await _after_markup(callback.from_user.id, res["map_key"])
+    elif res["status"] in {"started", "pending", "ready"}:
+        markup = await _active_markup(callback.from_user.id)
+    else:
+        markup = main_menu()
     await show(callback, _result_text(res), markup)
     await callback.answer()

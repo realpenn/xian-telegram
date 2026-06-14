@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from config.realms import SECLUSION_RATE
 
-STAMINA_REGEN_SECONDS = 240   # 1 点 / 4 分钟
+STAMINA_REGEN_SECONDS = 216   # 1 点 / 3.6 分钟，约 400 点 / 日
 OFFLINE_CAP_HOURS = 12        # 闭关离线上限
 
 

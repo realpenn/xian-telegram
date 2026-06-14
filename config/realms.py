@@ -22,8 +22,8 @@ BIG_BREAKTHROUGH = {
     3: {"pill": "元婴丹", "base_rate": 0.60, "tribulation": True},
 }
 
-_REALM_BASE_COST = {0: 100, 1: 800, 2: 6000, 3: 50000}
-_STAGE_MULT = 1.35
+_REALM_BASE_COST = {0: 200, 1: 800, 2: 6000, 3: 50000}
+_STAGE_MULT = 1.20
 
 # 属性锚点：每大境界 (初阶, 圆满)，小阶间线性插值。
 _ANCHORS = {
@@ -38,7 +38,7 @@ _ANCHORS = {
 }
 
 STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200}
-SECLUSION_RATE = {0: 200, 1: 600, 2: 2200, 3: 9000}  # 修为/小时
+SECLUSION_RATE = {0: 15, 1: 45, 2: 165, 3: 675}  # 修为/小时
 
 
 def num_stages(realm: int) -> int:

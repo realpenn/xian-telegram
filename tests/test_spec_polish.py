@@ -6,8 +6,8 @@ import pytest_asyncio
 from config import realms as R
 from handlers.common import action_callback_data, consume_action_callback
 from models import db
-from services import (breakthrough, character, crafting, explore, items, pvp, sect, settle,
-                      shop, world_boss)
+from services import (breakthrough, character, crafting, dungeon, explore, items, notifications,
+                      pvp, sect, settle, shop, world_boss)
 
 
 @pytest_asyncio.fixture
@@ -89,7 +89,8 @@ async def test_sect_welfare_affects_stats_and_seclusion(temp_db):
     await db.execute("UPDATE characters SET seclusion_at=? WHERE user_id=?", (1000, uid))
     char = await character.get(uid)
     res = await character.collect_seclusion(uid, now=4600)
-    assert res["gained"] > 600 * (1 + char.root_bone / 200)
+    without_sect = settle.seclusion_gain(1, 1000, 4600, char.root_bone)
+    assert res["gained"] > without_sect
 
 
 @pytest.mark.asyncio
@@ -193,10 +194,59 @@ async def test_explore_can_run_three_encounters(temp_db):
     await character.create(uid, "tester")
     await character.set_progress(uid, 1, 0, 0)
 
-    res = await explore.explore(uid, "后山", rng=_FakeRng())
+    started = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
+    res = await explore.collect(uid, now=started["finish_at"], rng=_FakeRng())
 
+    assert started["status"] == "started"
     assert res["status"] == "ok"
     assert any("第 3 战" in line for line in res["log"])
+    assert res["reward"]["cult"] == 11
+
+
+@pytest.mark.asyncio
+async def test_explore_waits_before_settlement(temp_db):
+    uid = 4024
+    await character.create(uid, "tester")
+
+    started = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
+    pending = await explore.collect(uid, now=started["finish_at"] - 1)
+    done = await explore.collect(uid, now=started["finish_at"], rng=_FakeRng())
+
+    assert 8 * 60 <= started["seconds"] <= 12 * 60
+    assert pending["status"] == "pending"
+    assert done["status"] == "ok"
+    assert await explore.active_run(uid, now=started["finish_at"]) is None
+
+
+@pytest.mark.asyncio
+async def test_ready_action_notifications_are_sent_once(temp_db):
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, user_id, text):
+            self.sent.append((user_id, text))
+
+    uid = 4027
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 3, 0, 0)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (200, 1000, uid))
+    explore_job = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
+    dungeon_job = await dungeon.start(uid, "qingyun", now=1000)
+    bot = FakeBot()
+
+    first = await notifications.notify_ready_actions(
+        bot, now=max(explore_job["finish_at"], dungeon_job["finish_at"]))
+    second = await notifications.notify_ready_actions(
+        bot, now=max(explore_job["finish_at"], dungeon_job["finish_at"]) + 1)
+
+    assert first == {"explore": 1, "dungeon": 1}
+    assert second == {"explore": 0, "dungeon": 0}
+    assert len(bot.sent) == 2
+    assert any("/explore" in text for _, text in bot.sent)
+    assert any("/dungeon" in text for _, text in bot.sent)
 
 
 @pytest.mark.asyncio
@@ -341,6 +391,41 @@ async def test_user_last_seen_is_updated(temp_db):
 
     assert row["username"] == "new"
     assert row["last_seen_at"] == 1234
+
+
+@pytest.mark.asyncio
+async def test_activity_auto_starts_seclusion_after_idle_hour(temp_db):
+    uid = 4025
+    await character.create(uid, "tester")
+    await db.execute(
+        "UPDATE users SET last_seen_at=? WHERE tg_user_id=?",
+        (1000, uid))
+
+    res = await character.touch_activity(uid, "tester", now=8200)
+    char = await character.get(uid)
+    user = await db.fetchone("SELECT last_seen_at FROM users WHERE tg_user_id=?", (uid,))
+
+    assert res["status"] == "ok"
+    assert res["auto_seclusion"]
+    assert res["started_at"] == 4600
+    assert char.seclusion_at == 4600
+    assert user["last_seen_at"] == 8200
+
+
+@pytest.mark.asyncio
+async def test_activity_does_not_auto_seclude_before_idle_hour(temp_db):
+    uid = 4026
+    await character.create(uid, "tester")
+    await db.execute(
+        "UPDATE users SET last_seen_at=? WHERE tg_user_id=?",
+        (1000, uid))
+
+    res = await character.touch_activity(uid, "tester", now=4599)
+    char = await character.get(uid)
+
+    assert res["status"] == "ok"
+    assert not res["auto_seclusion"]
+    assert char.seclusion_at == 0
 
 
 @pytest.mark.asyncio

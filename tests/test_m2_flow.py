@@ -124,10 +124,38 @@ async def test_dungeon_daily_limit_and_rewards(temp_db):
         "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
         (200, 1000, uid))
 
+    now = 1000
+    stamina_left = []
+    for _ in range(3):
+        started = await dungeon.start(uid, "qingyun", now=now)
+        pending = await dungeon.collect(uid, now=started["finish_at"] - 1)
+        res = await dungeon.collect(uid, now=started["finish_at"])
+
+        assert started["status"] == "started"
+        assert pending["status"] == "pending"
+        stamina_left.append(started["stamina_left"])
+        assert res["status"] == "ok"
+        assert res["cleared"] >= 1
+        now = started["finish_at"] + 1
+
+    assert stamina_left[0] == 150
+    assert stamina_left[0] > stamina_left[1] > stamina_left[2]
+    assert (await dungeon.start(uid, "qingyun", now=now))["status"] == "daily_done"
+
+
+@pytest.mark.asyncio
+async def test_dungeon_requires_single_run_stamina_cost(temp_db):
+    uid = 2017
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 3, 0, 0)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (49, 1000, uid))
+
     res = await dungeon.run(uid, "qingyun", now=1000)
-    assert res["status"] == "ok"
-    assert res["cleared"] >= 1
-    assert (await dungeon.run(uid, "qingyun", now=1001))["status"] == "daily_done"
+
+    assert res["status"] == "no_stamina"
+    assert res["need"] == 50
 
 
 @pytest.mark.asyncio

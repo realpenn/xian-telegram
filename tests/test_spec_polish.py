@@ -250,6 +250,20 @@ async def test_spirit_stones_can_buy_stamina(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_user_last_seen_is_updated(temp_db):
+    uid = 4016
+    await character.create(uid, "old")
+
+    await character.touch_user(uid, "new", now=1234)
+    row = await db.fetchone(
+        "SELECT username, last_seen_at FROM users WHERE tg_user_id=?",
+        (uid,))
+
+    assert row["username"] == "new"
+    assert row["last_seen_at"] == 1234
+
+
+@pytest.mark.asyncio
 async def test_recipe_item_unlocks_non_default_crafting(temp_db):
     uid = 4007
     await character.create(uid, "tester")

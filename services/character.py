@@ -81,6 +81,13 @@ async def exists(user_id: int) -> bool:
     return await db.fetchone("SELECT 1 FROM characters WHERE user_id=?", (user_id,)) is not None
 
 
+async def touch_user(user_id: int, username: str, now: int = None):
+    now = int(time.time()) if now is None else now
+    await db.execute(
+        "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
+        (username, now, user_id))
+
+
 def roll_root_bone(rng=random) -> int:
     return max(ROOT_BONE_MIN, min(ROOT_BONE_MAX, int(round(rng.gauss(60, 9)))))
 
@@ -92,8 +99,12 @@ async def create(user_id: int, username: str) -> Character:
     cap = R.STAMINA_CAP[0]
     async with db.transaction() as conn:
         await conn.execute(
-            "INSERT OR IGNORE INTO users(tg_user_id, username, created_at) VALUES(?,?,?)",
-            (user_id, username, now))
+            "INSERT OR IGNORE INTO users(tg_user_id, username, created_at, last_seen_at) "
+            "VALUES(?,?,?,?)",
+            (user_id, username, now, now))
+        await conn.execute(
+            "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
+            (username, now, user_id))
         # OR IGNORE：并发双 /start 时不抛 IntegrityError，已存在则保留原存档。
         await conn.execute(
             "INSERT OR IGNORE INTO characters(user_id, root_bone, spirit_root, realm, stage, "

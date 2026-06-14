@@ -16,11 +16,13 @@ async def cmd_start(message: Message):
     if await guard_private_message(message):
         return
     uid = message.from_user.id
+    username = message.from_user.username or message.from_user.full_name
     if await character.exists(uid):
+        await character.touch_user(uid, username)
         await message.answer("道友已在途中。发送 /me 查看道行，或点下方按钮。",
                              reply_markup=main_menu())
         return
-    char = await character.create(uid, message.from_user.username or message.from_user.full_name)
+    char = await character.create(uid, username)
     text = (
         "🌅 一道流光没入识海，道友自此踏上仙途！\n\n"
         "—— 测灵根 ——\n"

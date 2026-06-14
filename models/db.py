@@ -21,7 +21,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     tg_user_id  INTEGER PRIMARY KEY,
     username    TEXT,
-    created_at  INTEGER NOT NULL
+    created_at  INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS characters (
     user_id       INTEGER PRIMARY KEY,
@@ -159,6 +160,7 @@ async def init_db(path: str = None):
     _write_lock = asyncio.Lock()
     await _conn.execute("PRAGMA journal_mode=WAL;")
     await _conn.executescript(SCHEMA)
+    await _ensure_column(_conn, "users", "last_seen_at", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")

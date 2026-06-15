@@ -19,6 +19,25 @@ def first_buy_cost_per_stamina(realm: int) -> float:
     return stamina_buy_cost(realm, 1) / STAMINA_BUY_GAIN
 
 
+async def stamina_buy_offer(user_id: int, now: int = None) -> dict:
+    """返回当前商店应展示的下一次买精力价格。"""
+    now = int(time.time()) if now is None else now
+    day = _day(now)
+    row = await db.fetchone(
+        "SELECT realm, stamina_buy_count, stamina_buy_day FROM characters WHERE user_id=?",
+        (user_id,))
+    if not row:
+        return {"status": "missing"}
+    bought = row["stamina_buy_count"] if row["stamina_buy_day"] == day else 0
+    if bought >= STAMINA_BUY_DAILY_LIMIT:
+        return {"status": "buy_limit", "bought": bought,
+                "limit": STAMINA_BUY_DAILY_LIMIT, "gain": STAMINA_BUY_GAIN}
+    nth = bought + 1
+    return {"status": "ok", "cost": stamina_buy_cost(row["realm"], nth),
+            "gain": STAMINA_BUY_GAIN, "nth": nth,
+            "limit": STAMINA_BUY_DAILY_LIMIT}
+
+
 async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
     good = SHOP_ITEMS.get(item_key)
     if not good or qty <= 0:

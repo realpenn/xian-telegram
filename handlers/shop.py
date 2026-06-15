@@ -14,14 +14,19 @@ from services import character, shop
 router = Router()
 
 
-async def render_shop(user_id: int):
+async def render_shop(user_id: int, now: int = None):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
     rows = []
     lines = ["🪙 NPC 商店", f"灵石：{char.spirit_stone}", "可购："]
+    stamina_offer = await shop.stamina_buy_offer(user_id, now=now)
+    if stamina_offer["status"] == "buy_limit":
+        stamina_text = f"购买精力（今日已达上限 {stamina_offer['limit']} 次）"
+    else:
+        stamina_text = f"购买精力（🪙{stamina_offer['cost']} / ⚡{stamina_offer['gain']}）"
     rows.append([InlineKeyboardButton(
-        text="购买精力（🪙80 / ⚡20）",
+        text=stamina_text,
         callback_data=await action_callback_data(user_id, "shop:stamina"))])
     for key, good in goods_for_realm(char.realm):
         lines.append(f"- {item_name(key)}：{good['price']} 灵石")

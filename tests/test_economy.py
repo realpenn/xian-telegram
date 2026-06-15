@@ -1,8 +1,11 @@
 """经济回归测试(#16):买精力阶梯价/每日上限、补灵丹每日上限。"""
+import time
+
 import pytest
 import pytest_asyncio
 
 from config import shop as shop_cfg
+from handlers import shop as shop_handler
 from models import db
 from services import character, items, shop
 
@@ -52,6 +55,29 @@ async def test_buy_stamina_escalates_and_caps(temp_db):
     res = await shop.buy_stamina(uid, now=1000 + DAY)
     assert res["status"] == "stamina_ok"
     assert res["cost"] == shop_cfg.stamina_buy_cost(3, 1)
+
+
+@pytest.mark.asyncio
+async def test_render_shop_shows_next_stamina_buy_cost(temp_db):
+    uid = 5003
+    now = 1000
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 3, 0, 0)
+
+    await db.execute(
+        "UPDATE characters SET stamina_buy_count=1, stamina_buy_day=? WHERE user_id=?",
+        (today, uid))
+    _, markup = await shop_handler.render_shop(uid, now=now)
+    assert markup.inline_keyboard[0][0].text == (
+        f"购买精力（🪙{shop_cfg.stamina_buy_cost(3, 2)} / ⚡{shop_cfg.STAMINA_BUY_GAIN}）")
+
+    await db.execute(
+        "UPDATE characters SET stamina_buy_count=2, stamina_buy_day=? WHERE user_id=?",
+        (today, uid))
+    _, markup = await shop_handler.render_shop(uid, now=now)
+    assert markup.inline_keyboard[0][0].text == (
+        f"购买精力（🪙{shop_cfg.stamina_buy_cost(3, 3)} / ⚡{shop_cfg.STAMINA_BUY_GAIN}）")
 
 
 @pytest.mark.asyncio

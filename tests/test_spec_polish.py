@@ -227,14 +227,17 @@ async def test_ready_action_notifications_are_sent_once(temp_db):
         async def send_message(self, user_id, text):
             self.sent.append((user_id, text))
 
-    uid = 4027
-    await character.create(uid, "tester")
-    await character.set_progress(uid, 3, 0, 0)
+    # 历练与秘境互斥（issue #12），故用两名玩家分别承载两类任务。
+    explorer, delver = 4027, 4028
+    await character.create(explorer, "explorer")
+    await character.create(delver, "delver")
+    await character.set_progress(explorer, 3, 0, 0)
+    await character.set_progress(delver, 3, 0, 0)
     await db.execute(
-        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-        (200, 1000, uid))
-    explore_job = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
-    dungeon_job = await dungeon.start(uid, "qingyun", now=1000)
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id IN (?,?)",
+        (200, 1000, explorer, delver))
+    explore_job = await explore.start(explorer, "后山", now=1000, rng=_FakeRng())
+    dungeon_job = await dungeon.start(delver, "qingyun", now=1000)
     bot = FakeBot()
 
     first = await notifications.notify_ready_actions(

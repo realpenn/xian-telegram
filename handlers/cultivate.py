@@ -26,7 +26,11 @@ async def do_cultivate(user_id: int):
         if res["can_advance"]:
             lines.append("✨ 修为已足，可尝试突破！")
         return "\n".join(lines), await menu_with_breakthrough(user_id, res["can_advance"])
-    await cultivation.start(user_id)
+    res = await cultivation.start(user_id)
+    if res["status"] == "busy_explore":
+        return "道友正在外历练，须归来后方可闭关。", main_menu()
+    if res["status"] == "busy_dungeon":
+        return "道友正在秘境之中，须出秘境后方可闭关。", main_menu()
     text = ("🧘 道友盘膝而坐，敛息凝神，开始闭关参悟……\n"
             "（修为随时间累积，离线上限 12 时辰。再用一次 /cultivate 或点「闭关」即出关收功。）")
     return text, main_menu()

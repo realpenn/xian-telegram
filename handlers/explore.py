@@ -83,6 +83,8 @@ def _result_text(res: dict) -> str:
         return f"此地凶险，需修为至 {res['need']} 方可踏足。"
     if s == "in_seclusion":
         return "道友尚在闭关，神游太虚，不可同时外出历练。"
+    if s == "busy_dungeon":
+        return "道友正在秘境之中，须出秘境后方可外出历练。"
     if s == "no_stamina":
         return f"精力不济（需 {res['need']}，余 {res['have']}），且去闭关歇息。"
     if s == "missing":

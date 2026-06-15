@@ -583,6 +583,20 @@ async def start_seclusion(user_id: int, now: int = None) -> dict:
             return {"status": "missing"}
         if row["seclusion_at"]:
             return {"status": "already"}
+        cur = await conn.execute(
+            "SELECT 1 FROM explore_runs WHERE user_id=? AND status='active'",
+            (user_id,))
+        busy = await cur.fetchone()
+        await cur.close()
+        if busy:
+            return {"status": "busy_explore"}
+        cur = await conn.execute(
+            "SELECT 1 FROM dungeon_jobs WHERE user_id=? AND status='active'",
+            (user_id,))
+        busy = await cur.fetchone()
+        await cur.close()
+        if busy:
+            return {"status": "busy_dungeon"}
         welfare = await _sect_welfare(conn, user_id)
         stamina, stamina_at = _settled_stamina(row, now, welfare)
         await conn.execute(

@@ -74,6 +74,8 @@ def _result_text(res: dict) -> str:
         return f"今日此秘境次数已用尽（{res.get('limit', dungeon.DUNGEON_DAILY_LIMIT)} 次），且待明日。"
     if s == "in_seclusion":
         return "道友仍在闭关，不可入秘境。"
+    if s == "busy_explore":
+        return "道友正在外历练，须归来后方可入秘境。"
     if s == "no_stamina":
         return f"精力不济（需 {res['need']}，余 {res['have']}）。"
     if s == "missing":

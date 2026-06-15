@@ -69,6 +69,14 @@ async def start(user_id: int, map_key: str, now: int = None, rng=None) -> dict:
         if active:
             return _run_status(active, now)
 
+        cur = await conn.execute(
+            "SELECT 1 FROM dungeon_jobs WHERE user_id=? AND status='active'",
+            (user_id,))
+        busy = await cur.fetchone()
+        await cur.close()
+        if busy:
+            return {"status": "busy_dungeon"}
+
         row = await character._select_character(conn, user_id)
         if not row:
             return {"status": "missing"}

@@ -18,9 +18,11 @@ def _name(user) -> str:
 def _text(res: dict, opponent_name: str = "对手") -> str:
     s = res["status"]
     if s == "ok":
+        attacker = res.get("attacker_name", "道友")
+        defender = res.get("defender_name", opponent_name)
         shown = res["log"] if len(res["log"]) <= 8 else (res["log"][:7] + ["……", res["log"][-1]])
         return "\n".join([
-            f"⚔️ 切磋：道友 vs {opponent_name}",
+            f"⚔️ 切磋：{attacker} vs {defender}",
             *shown,
             f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}，"
             f"声望 +{res['reputation_gain']}。",
@@ -42,9 +44,9 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
     return "切磋未成。"
 
 
-def _preview_text(opponent_name: str) -> str:
+def _preview_text(attacker_name: str, opponent_name: str) -> str:
     return "\n".join([
-        f"⚔️ 切磋邀战：道友 vs {opponent_name}",
+        f"⚔️ 切磋邀战：{attacker_name} vs {opponent_name}",
         "此战只影响天梯积分与声望，不掉资源。",
         "确认后即刻自动结算。",
     ])
@@ -84,7 +86,8 @@ async def cmd_pvp(message: Message):
         await message.answer(_text(preview, opponent_name))
         return
     await message.answer(
-        _preview_text(opponent_name if defender_id else preview["name"]),
+        _preview_text(_name(message.from_user),
+                      opponent_name if defender_id else preview["name"]),
         reply_markup=await _confirm_markup(message.from_user.id, preview["defender_id"]))
 
 
@@ -94,6 +97,7 @@ async def cb_pvp_confirm(callback: CallbackQuery):
     if not action or not action.startswith("pvp:duel:"):
         return
     defender_id = int(action.rsplit(":", 1)[1])
-    res = await pvp.duel(callback.from_user.id, defender_id)
+    res = await pvp.duel(callback.from_user.id, defender_id,
+                         attacker_name=_name(callback.from_user))
     await show(callback, _text(res), None)
     await callback.answer()

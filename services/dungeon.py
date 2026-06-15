@@ -75,6 +75,14 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
         if active:
             return _run_status(active, now)
 
+        cur = await conn.execute(
+            "SELECT 1 FROM explore_runs WHERE user_id=? AND status='active'",
+            (user_id,))
+        busy = await cur.fetchone()
+        await cur.close()
+        if busy:
+            return {"status": "busy_explore"}
+
         row = await character._select_character(conn, user_id)
         if not row:
             return {"status": "missing"}

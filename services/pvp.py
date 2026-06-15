@@ -132,6 +132,14 @@ async def preview_duel(attacker_id: int, defender_id: int = None) -> dict:
             "name": row["username"] if row and row["username"] else str(res["defender_id"])}
 
 
+async def _display_name(user_id: int, fallback: str) -> str:
+    row = await db.fetchone(
+        "SELECT username FROM users WHERE tg_user_id=?", (user_id,))
+    if row and row["username"]:
+        return row["username"]
+    return fallback
+
+
 async def _combatant(user_id: int, name: str) -> Combatant:
     char = await character.get(user_id)
     st = await character.stats(char)
@@ -142,12 +150,15 @@ async def _combatant(user_id: int, name: str) -> Combatant:
                      **mods)
 
 
-async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> dict:
+async def duel(attacker_id: int, defender_id: int = None, now: int = None,
+               attacker_name: str = None, defender_name: str = None) -> dict:
     now = int(time.time()) if now is None else now
     pair = await _validate_pair(attacker_id, defender_id)
     if pair["status"] != "ok":
         return pair
     defender_id = pair["defender_id"]
+    attacker_name = attacker_name or await _display_name(attacker_id, str(attacker_id))
+    defender_name = defender_name or await _display_name(defender_id, str(defender_id))
 
     day = _day(now)
     async with db.transaction() as conn:
@@ -160,8 +171,8 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> di
             "UPDATE pvp_ratings SET daily_count=?, daily_reset_at=? WHERE user_id=?",
             (daily_count + 1, day, attacker_id))
 
-    a = await _combatant(attacker_id, "道友")
-    d = await _combatant(defender_id, "对手")
+    a = await _combatant(attacker_id, attacker_name)
+    d = await _combatant(defender_id, defender_name)
     result = simulate(a, d, seed=random.getrandbits(32))
     attacker_win = result["winner"] is a
 
@@ -190,7 +201,8 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None) -> di
     return {"status": "ok", "win": attacker_win, "rating_delta": change,
             "reputation_gain": WIN_REPUTATION if attacker_win else LOSS_REPUTATION,
             "defender_id": defender_id, "log": result["log"],
-            "rounds": result["rounds"]}
+            "rounds": result["rounds"],
+            "attacker_name": attacker_name, "defender_name": defender_name}
 
 
 async def top(limit: int = 10):

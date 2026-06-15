@@ -8,6 +8,7 @@ from config import realms as R
 from config.maps import MAPS
 from models import db
 from services import breakthrough, character, cultivation
+from services import dungeon as dungeon_service
 from services import explore as explore_service
 
 
@@ -33,6 +34,48 @@ async def test_db_write_lock_waits_in_running_loop(temp_db):
     await waiter
     row = await db.fetchone("SELECT username FROM users WHERE tg_user_id=?", (9001,))
     assert row["username"] == "waiter"
+
+
+@pytest.mark.asyncio
+async def test_explore_blocked_during_dungeon(temp_db):
+    uid = 1101
+    await character.create(uid, "tester")
+    started = await dungeon_service.start(uid, "lingxi")
+    assert started["status"] == "started"
+
+    res = await explore_service.start(uid, "后山")
+
+    assert res["status"] == "busy_dungeon"
+    assert await explore_service.active_run(uid) is None
+    assert await dungeon_service.active_run(uid) is not None
+
+
+@pytest.mark.asyncio
+async def test_dungeon_blocked_during_explore(temp_db):
+    uid = 1102
+    await character.create(uid, "tester")
+    started = await explore_service.start(uid, "后山")
+    assert started["status"] == "started"
+
+    res = await dungeon_service.start(uid, "lingxi")
+
+    assert res["status"] == "busy_explore"
+    assert await dungeon_service.active_run(uid) is None
+    assert await explore_service.active_run(uid) is not None
+
+
+@pytest.mark.asyncio
+async def test_seclusion_blocked_during_timed_activity(temp_db):
+    uid = 1103
+    await character.create(uid, "tester")
+    started = await explore_service.start(uid, "后山")
+    assert started["status"] == "started"
+
+    res = await cultivation.start(uid)
+
+    assert res["status"] == "busy_explore"
+    assert not (await character.get(uid)).seclusion_at
+    assert await explore_service.active_run(uid) is not None
 
 
 @pytest.mark.asyncio

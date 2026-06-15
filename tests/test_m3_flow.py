@@ -36,6 +36,46 @@ async def test_pvp_duel_updates_ratings_and_reward(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_pvp_duel_shows_real_names(temp_db):
+    a, b = 3101, 3102
+    await character.create(a, "alice")
+    await character.create(b, "bob")
+    await character.set_progress(a, 1, R.num_stages(1) - 1, 0)
+    await character.set_progress(b, 1, 0, 0)
+
+    res = await pvp.duel(a, b, now=1000)
+    assert res["status"] == "ok"
+    assert res["attacker_name"] == "alice"
+    assert res["defender_name"] == "bob"
+    joined = "\n".join(res["log"])
+    assert "道友" not in joined and "对手" not in joined
+    assert "alice" in joined and "bob" in joined
+
+    # 群昵称（无库内 @username）应作为显示名透传进战斗日志。
+    res2 = await pvp.duel(a, b, now=1000, attacker_name="剑无尘")
+    assert res2["attacker_name"] == "剑无尘"
+    assert "剑无尘" in "\n".join(res2["log"])
+
+
+@pytest.mark.asyncio
+async def test_pvp_duel_falls_back_to_user_ids(temp_db):
+    a, b = 3111, 3112
+    await character.create(a, "")
+    await character.create(b, "")
+    await character.set_progress(a, 1, R.num_stages(1) - 1, 0)
+    await character.set_progress(b, 1, 0, 0)
+
+    res = await pvp.duel(a, b, now=1000)
+
+    assert res["status"] == "ok"
+    assert res["attacker_name"] == str(a)
+    assert res["defender_name"] == str(b)
+    joined = "\n".join(res["log"])
+    assert "道友" not in joined and "对手" not in joined
+    assert str(a) in joined and str(b) in joined
+
+
+@pytest.mark.asyncio
 async def test_world_boss_challenge_defeats_and_rewards(temp_db):
     original = copy.deepcopy(bosses.WORLD_BOSSES["ancient_dragon"])
     bosses.WORLD_BOSSES["ancient_dragon"]["hp"] = 1

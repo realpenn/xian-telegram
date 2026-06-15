@@ -134,21 +134,27 @@ async def collect(user_id: int, now: int = None, rng=None) -> dict:
             return {"status": "no_active"}
         if row["finish_at"] > now:
             return _run_status(row, now)
-        job = dict(row)
+        # 在同一事务内结算并删除，避免"已删但奖励未发"的崩溃窗口。
+        result = await _resolve(user_id, row["dungeon_key"], row["seed"], now, rng, conn=conn)
         await conn.execute("DELETE FROM dungeon_jobs WHERE user_id=?", (user_id,))
-    return await _resolve(user_id, job["dungeon_key"], job["seed"], now, rng)
+        return result
 
 
 async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     return await start(user_id, dungeon_key, now)
 
 
-async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None) -> dict:
+async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None, conn=None) -> dict:
     d = DUNGEONS.get(dungeon_key)
     if not d:
         return {"status": "bad_dungeon"}
     rng = rng or random.Random(seed)
-    char = await character.get_at(user_id, now)
+    if conn is not None:
+        # 已在写事务内：只读取角色（不触发 get_at 的精力落库写，避免重入写锁死锁）。
+        row = await character._select_character(conn, user_id)
+        char = character._from_row(row) if row else None
+    else:
+        char = await character.get_at(user_id, now)
     if not char:
         return {"status": "missing"}
     st = await character.stats(char)
@@ -177,13 +183,19 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
         for key, qty in raw_drops.items():
             if ITEMS.get(key, {}).get("type") == "equipment":
                 for _ in range(qty):
-                    await character.create_item_instance(user_id, key)
+                    if conn is not None:
+                        await character._create_item_instance_conn(conn, user_id, key)
+                    else:
+                        await character.create_item_instance(user_id, key)
                     equipment_drops.append(item_name(key))
             else:
                 stack_drops[key] = qty
         stone = int(rng.randint(*d["stone"]) * reward_factor)
         cult = int(d["cult"] * reward_factor)
-        await character.grant_reward(user_id, stone, cult, stack_drops)
+        if conn is not None:
+            await character._grant_reward_conn(conn, user_id, stone, cult, stack_drops)
+        else:
+            await character.grant_reward(user_id, stone, cult, stack_drops)
     else:
         stone = cult = 0
 

@@ -250,6 +250,34 @@ async def test_ready_action_notifications_are_sent_once(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_ready_action_notifications_stop_after_failures(temp_db):
+    class FailingBot:
+        def __init__(self):
+            self.calls = 0
+
+        async def send_message(self, user_id, text):
+            self.calls += 1
+            raise RuntimeError("telegram unavailable")
+
+    uid = 4029
+    await character.create(uid, "tester")
+    started = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
+    bot = FailingBot()
+
+    for offset in range(notifications.MAX_NOTIFY_ATTEMPTS + 1):
+        res = await notifications.notify_ready_actions(
+            bot, now=started["finish_at"] + offset)
+        assert res == {"explore": 0, "dungeon": 0}
+
+    row = await db.fetchone(
+        "SELECT notify_attempts, notified_at FROM explore_runs WHERE user_id=?",
+        (uid,))
+    assert row["notify_attempts"] == notifications.MAX_NOTIFY_ATTEMPTS
+    assert row["notified_at"] == started["finish_at"] + notifications.MAX_NOTIFY_ATTEMPTS - 1
+    assert bot.calls == notifications.MAX_NOTIFY_ATTEMPTS
+
+
+@pytest.mark.asyncio
 async def test_world_boss_scheduled_spawn_uses_known_chats(temp_db):
     class SentMessage:
         def __init__(self, message_id):
@@ -412,7 +440,7 @@ async def test_user_last_seen_is_updated(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_activity_auto_starts_seclusion_after_idle_hour(temp_db):
+async def test_activity_auto_collects_after_idle_hour(temp_db):
     uid = 4025
     await character.create(uid, "tester")
     await db.execute(
@@ -424,14 +452,14 @@ async def test_activity_auto_starts_seclusion_after_idle_hour(temp_db):
     user = await db.fetchone("SELECT last_seen_at FROM users WHERE tg_user_id=?", (uid,))
 
     assert res["status"] == "ok"
-    assert res["auto_seclusion"]
-    assert res["started_at"] == 4600
-    assert char.seclusion_at == 4600
+    assert res["auto_cultivation"] > 0       # 返回即自动收功（不再把人留在闭关里）
+    assert char.cultivation > 0
+    assert char.seclusion_at == 0
     assert user["last_seen_at"] == 8200
 
 
 @pytest.mark.asyncio
-async def test_activity_does_not_auto_seclude_before_idle_hour(temp_db):
+async def test_activity_no_auto_collect_before_idle_hour(temp_db):
     uid = 4026
     await character.create(uid, "tester")
     await db.execute(
@@ -442,7 +470,7 @@ async def test_activity_does_not_auto_seclude_before_idle_hour(temp_db):
     char = await character.get(uid)
 
     assert res["status"] == "ok"
-    assert not res["auto_seclusion"]
+    assert res["auto_cultivation"] == 0      # 未达闲置阈值，不自动收功
     assert char.seclusion_at == 0
 
 

@@ -9,6 +9,7 @@ from config.maps import MAPS
 from models import db
 
 log = logging.getLogger("xian.notifications")
+MAX_NOTIFY_ATTEMPTS = 5
 
 
 async def notify_ready_actions(bot, now: int = None) -> dict:
@@ -20,7 +21,7 @@ async def notify_ready_actions(bot, now: int = None) -> dict:
 
 async def _notify_explore(bot, now: int) -> int:
     rows = await db.fetchall(
-        "SELECT user_id, map_key FROM explore_runs "
+        "SELECT user_id, map_key, notify_attempts FROM explore_runs "
         "WHERE status='active' AND finish_at<=? AND notified_at IS NULL",
         (now,))
     sent = 0
@@ -35,12 +36,15 @@ async def _notify_explore(bot, now: int) -> int:
                 "WHERE user_id=? AND notified_at IS NULL",
                 (now, row["user_id"]))
             sent += 1
+        else:
+            await _record_failure("explore_runs", row["user_id"],
+                                  int(row["notify_attempts"] or 0), now)
     return sent
 
 
 async def _notify_dungeon(bot, now: int) -> int:
     rows = await db.fetchall(
-        "SELECT user_id, dungeon_key FROM dungeon_jobs "
+        "SELECT user_id, dungeon_key, notify_attempts FROM dungeon_jobs "
         "WHERE status='active' AND finish_at<=? AND notified_at IS NULL",
         (now,))
     sent = 0
@@ -55,7 +59,25 @@ async def _notify_dungeon(bot, now: int) -> int:
                 "WHERE user_id=? AND notified_at IS NULL",
                 (now, row["user_id"]))
             sent += 1
+        else:
+            await _record_failure("dungeon_jobs", row["user_id"],
+                                  int(row["notify_attempts"] or 0), now)
     return sent
+
+
+async def _record_failure(table: str, user_id: int, attempts: int, now: int):
+    """发送失败：累加重试次数，达上限（5 次）则标记已通知、停止重试。"""
+    next_attempts = attempts + 1
+    if next_attempts >= MAX_NOTIFY_ATTEMPTS:
+        await db.execute(
+            f"UPDATE {table} SET notify_attempts=?, notified_at=? "
+            "WHERE user_id=? AND notified_at IS NULL",
+            (next_attempts, now, user_id))
+    else:
+        await db.execute(
+            f"UPDATE {table} SET notify_attempts=? "
+            "WHERE user_id=? AND notified_at IS NULL",
+            (next_attempts, user_id))
 
 
 async def _send(bot, user_id: int, text: str) -> bool:

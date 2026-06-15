@@ -119,21 +119,27 @@ async def collect(user_id: int, now: int = None, rng=None) -> dict:
             return {"status": "no_active"}
         if row["finish_at"] > now:
             return _run_status(row, now)
-        run = dict(row)
+        # 在同一事务内结算并删除，避免"已删但奖励未发"的崩溃窗口。
+        result = await _resolve(user_id, row["map_key"], row["seed"], now, rng, conn=conn)
         await conn.execute("DELETE FROM explore_runs WHERE user_id=?", (user_id,))
-    return await _resolve(user_id, run["map_key"], run["seed"], now, rng)
+        return result
 
 
 async def explore(user_id: int, map_key: str, rng=None, now: int = None) -> dict:
     return await start(user_id, map_key, now, rng)
 
 
-async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None) -> dict:
+async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, conn=None) -> dict:
     m = MAPS.get(map_key)
     if not m:
         return {"status": "bad_map"}
     rng = rng or random.Random(seed)
-    char = await character.get_at(user_id, now)
+    if conn is not None:
+        # 已在写事务内：只读取角色（不触发 get_at 的精力落库写，避免重入写锁死锁）。
+        row = await character._select_character(conn, user_id)
+        char = character._from_row(row) if row else None
+    else:
+        char = await character.get_at(user_id, now)
     if not char:
         return {"status": "missing"}
     st = await character.stats(char)
@@ -163,7 +169,10 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None) ->
         cult = max(1, int(m["cult"] * _uniform(rng, 0.9, 1.1))) * mult
         welfare = await character.sect_welfare(user_id)
         drops = _roll_drops(m, rng, welfare["drop_pct"])
-        await character.grant_reward(user_id, stone, cult, drops)
+        if conn is not None:
+            await character._grant_reward_conn(conn, user_id, stone, cult, drops)
+        else:
+            await character.grant_reward(user_id, stone, cult, drops)
         reward = {"stone": stone, "cult": cult, "drops": drops}
 
     return {"status": "ok", "map_key": map_key, "map": m["name"],

@@ -125,6 +125,18 @@ async def touch_user(user_id: int, username: str, now: int = None):
         (username, now, user_id))
 
 
+async def _has_active_job(conn, user_id: int) -> bool:
+    """是否有进行中的定时任务（历练 / 秘境），用于让自动闭关避开它们。"""
+    cur = await conn.execute(
+        "SELECT 1 FROM explore_runs WHERE user_id=? AND status='active' "
+        "UNION ALL "
+        "SELECT 1 FROM dungeon_jobs WHERE user_id=? AND status='active' LIMIT 1",
+        (user_id, user_id))
+    row = await cur.fetchone()
+    await cur.close()
+    return row is not None
+
+
 async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     async with db.transaction() as conn:
@@ -134,25 +146,36 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
         if not user:
             return {"status": "missing"}
 
-        auto_started = False
-        started_at = None
+        auto_gain = 0
         row = await _select_character(conn, user_id)
+        # 返回即自动收功：闲置超阈值时，把闲置那段直接结算成修为发给玩家，
+        # 不把人留在闭关里（否则会挡住其本次想做的操作）；进行中的定时任务则避开。
         if row and not row["seclusion_at"]:
             last_seen = int(user["last_seen_at"] or user["created_at"] or now)
-            if now - last_seen >= AUTO_SECLUSION_IDLE_SECONDS:
-                started_at = last_seen + AUTO_SECLUSION_IDLE_SECONDS
+            if (now - last_seen >= AUTO_SECLUSION_IDLE_SECONDS
+                    and not await _has_active_job(conn, user_id)):
+                settle_start = last_seen + AUTO_SECLUSION_IDLE_SECONDS
                 welfare = await _sect_welfare(conn, user_id)
-                stamina, stamina_at = _settled_stamina(row, started_at, welfare)
+                state = json.loads(row["debuff_json"] or "{}")
+                place_factor = (
+                    (1 + welfare["seclusion_pct"])
+                    * (1 + temporary_seclusion_pct(state, now))
+                )
+                auto_gain, remainder = settle.seclusion_gain_with_remainder(
+                    row["realm"], row["stage"], settle_start, now,
+                    root_bone=row["root_bone"], place_factor=place_factor,
+                    remainder_units=_seclusion_remainder(state, row["realm"], row["stage"]),
+                    offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
+                _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
                 await conn.execute(
-                    "UPDATE characters SET stamina=?, stamina_at=?, seclusion_at=? "
+                    "UPDATE characters SET cultivation = cultivation + ?, debuff_json = ? "
                     "WHERE user_id=?",
-                    (stamina, stamina_at, started_at, user_id))
-                auto_started = True
+                    (auto_gain, json.dumps(state, ensure_ascii=False), user_id))
 
         await conn.execute(
             "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
             (username, now, user_id))
-        return {"status": "ok", "auto_seclusion": auto_started, "started_at": started_at}
+        return {"status": "ok", "auto_cultivation": auto_gain}
 
 
 def roll_root_bone(rng=random) -> int:
@@ -406,13 +429,19 @@ async def add_cultivation(user_id: int, amount: int):
         (amount, user_id))
 
 
-async def create_item_instance(user_id: int, base_key: str, tier: str = None, affixes=None):
+async def _create_item_instance_conn(conn, user_id: int, base_key: str,
+                                     tier: str = None, affixes=None):
     item = ITEMS[base_key]
     tier = tier or item.get("tier", "凡")
     affixes_json = json.dumps(affixes or {}, ensure_ascii=False)
-    await db.execute(
+    await conn.execute(
         "INSERT INTO item_instances(user_id, base_key, tier, affixes_json) VALUES(?,?,?,?)",
         (user_id, base_key, tier, affixes_json))
+
+
+async def create_item_instance(user_id: int, base_key: str, tier: str = None, affixes=None):
+    async with db.transaction() as conn:
+        await _create_item_instance_conn(conn, user_id, base_key, tier, affixes)
 
 
 async def equip_instance(user_id: int, instance_id: int) -> dict:
@@ -596,17 +625,21 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
                 "minutes": max(0, (now - row["seclusion_at"]) // 60)}
 
 
-async def grant_reward(user_id: int, stone: int = 0, cultivation: int = 0, drops: dict = None):
-    drops = drops or {}
-    async with db.transaction() as conn:
+async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
+                             cultivation: int = 0, drops: dict = None):
+    await conn.execute(
+        "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?), "
+        "cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
+        (stone, cultivation, user_id))
+    for key, qty in (drops or {}).items():
+        if qty <= 0:
+            continue
         await conn.execute(
-            "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?), "
-            "cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
-            (stone, cultivation, user_id))
-        for key, qty in drops.items():
-            if qty <= 0:
-                continue
-            await conn.execute(
-                "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-                "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = MAX(0, qty + ?)",
-                (user_id, key, qty, qty))
+            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
+            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = MAX(0, qty + ?)",
+            (user_id, key, qty, qty))
+
+
+async def grant_reward(user_id: int, stone: int = 0, cultivation: int = 0, drops: dict = None):
+    async with db.transaction() as conn:
+        await _grant_reward_conn(conn, user_id, stone, cultivation, drops)

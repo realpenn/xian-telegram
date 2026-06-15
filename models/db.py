@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS explore_runs (
     finish_at  INTEGER NOT NULL,
     seed       INTEGER NOT NULL,
     status     TEXT NOT NULL,
+    notify_attempts INTEGER NOT NULL DEFAULT 0,
     notified_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS dungeon_jobs (
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS dungeon_jobs (
     finish_at   INTEGER NOT NULL,
     seed        INTEGER NOT NULL,
     status      TEXT NOT NULL,
+    notify_attempts INTEGER NOT NULL DEFAULT 0,
     notified_at INTEGER
 );
 CREATE TABLE IF NOT EXISTS dungeon_runs (
@@ -190,6 +192,8 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "explore_runs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "notified_at", "INTEGER")
+    await _ensure_column(_conn, "explore_runs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "dungeon_jobs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")
     await _conn.commit()
     # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
     _read_conn = await aiosqlite.connect(db_path)

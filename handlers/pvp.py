@@ -69,12 +69,14 @@ async def cmd_pvp(message: Message):
         await message.answer("切磋与天梯请在群中进行。")
         return
     await world_boss.remember_chat(message.chat.id, message.chat.title)
+    await world_boss.remember_cultivator(message.chat.id, message.from_user.id)
     defender_id = None
     opponent_name = "随机对手"
     if message.reply_to_message and message.reply_to_message.from_user:
         opponent = message.reply_to_message.from_user
         defender_id = opponent.id
         opponent_name = _name(opponent)
+        await world_boss.remember_cultivator(message.chat.id, defender_id)
     else:
         parts = message.text.split(maxsplit=1)
         if len(parts) == 2:
@@ -99,6 +101,8 @@ async def cb_pvp_confirm(callback: CallbackQuery):
     action = await consume_action_callback(callback)
     if not action or not action.startswith("pvp:duel:"):
         return
+    if callback.message and not is_private_chat(callback.message.chat):
+        await world_boss.remember_cultivator(callback.message.chat.id, callback.from_user.id)
     defender_id = int(action.rsplit(":", 1)[1])
     res = await pvp.duel(callback.from_user.id, defender_id,
                          attacker_name=_name(callback.from_user))

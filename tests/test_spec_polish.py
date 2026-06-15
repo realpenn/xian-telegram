@@ -295,12 +295,12 @@ async def test_world_boss_scheduled_spawn_uses_known_chats(temp_db):
             self.sent = []
             self.edited = []
 
-        async def send_message(self, chat_id, text):
-            self.sent.append((chat_id, text))
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.sent.append((chat_id, text, reply_markup))
             return SentMessage(len(self.sent))
 
-        async def edit_message_text(self, text, chat_id, message_id):
-            self.edited.append((chat_id, message_id, text))
+        async def edit_message_text(self, text, chat_id, message_id, reply_markup=None):
+            self.edited.append((chat_id, message_id, text, reply_markup))
 
     await world_boss.remember_chat(-4005, "试炼群", now=1000)
     bot = FakeBot()
@@ -310,8 +310,10 @@ async def test_world_boss_scheduled_spawn_uses_known_chats(temp_db):
 
     assert spawned
     assert bot.sent and bot.sent[0][0] == -4005
+    assert bot.sent[0][2] is not None
     assert len(bot.sent) == 1
     assert bot.edited and bot.edited[0][0] == -4005
+    assert bot.edited[0][3] is not None
 
 
 @pytest.mark.asyncio

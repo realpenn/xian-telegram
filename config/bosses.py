@@ -39,6 +39,9 @@ WORLD_BOSSES = {
     },
 }
 
+# Boss 血量按本群已知修仙者人数缩放；达到该人数后使用配置满血。
+WORLD_BOSS_FULL_HP_CULTIVATORS = 10
+
 # 默认档（无历史信息时用筑基入门档）。
 DEFAULT_BOSS = "zhuji"
 LEGACY_BOSS_ALIASES = {"ancient_dragon": "zhuji"}

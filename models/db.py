@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS world_boss (
     spawn_at      INTEGER NOT NULL,
     expire_at     INTEGER NOT NULL,
     message_id    INTEGER,
+    cultivator_count INTEGER NOT NULL DEFAULT 1,
     status        TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS world_boss_damage (
@@ -176,6 +177,12 @@ CREATE TABLE IF NOT EXISTS bot_chats (
     title         TEXT,
     last_seen_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS bot_chat_members (
+    chat_id       INTEGER NOT NULL,
+    user_id       INTEGER NOT NULL,
+    last_seen_at  INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS callback_tokens (
     token        TEXT PRIMARY KEY,
     user_id      INTEGER,
@@ -208,6 +215,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
+    await _ensure_column(_conn, "world_boss", "cultivator_count", "INTEGER NOT NULL DEFAULT 1")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_reputation", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")

@@ -140,7 +140,7 @@ async def test_world_boss_challenge_defeats_and_rewards(temp_db):
     try:
         uid = 3003
         await character.create(uid, "bosskiller")
-        await character.set_progress(uid, 3, 0, 0)
+        await character.set_progress(uid, 1, R.num_stages(1) - 1, 0)
         await db.execute(
             "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
             (200, 1000, uid))
@@ -153,6 +153,53 @@ async def test_world_boss_challenge_defeats_and_rewards(temp_db):
         assert (await character.get(uid)).spirit_stone >= 200
     finally:
         bosses.WORLD_BOSSES["zhuji"] = original
+
+
+@pytest.mark.asyncio
+async def test_world_boss_hp_scales_by_known_group_cultivators(temp_db):
+    solo_chat = -3301
+    solo_uid = 330101
+    await character.create(solo_uid, "solo")
+    await world_boss.remember_chat(solo_chat, "独行群", now=1000)
+    assert await world_boss.remember_cultivator(solo_chat, solo_uid, now=1000)
+
+    solo = await world_boss.ensure_active(solo_chat, now=1000)
+
+    full_hp = bosses.WORLD_BOSSES["zhuji"]["total_hp"]
+    assert solo["cultivator_count"] == 1
+    assert solo["total_hp"] == full_hp // bosses.WORLD_BOSS_FULL_HP_CULTIVATORS
+    assert solo["remaining_hp"] == solo["total_hp"]
+
+    many_chat = -3302
+    await world_boss.remember_chat(many_chat, "十人群", now=1000)
+    for idx in range(bosses.WORLD_BOSS_FULL_HP_CULTIVATORS):
+        uid = 330200 + idx
+        await character.create(uid, f"dao{idx}")
+        await world_boss.remember_cultivator(many_chat, uid, now=1000)
+
+    many = await world_boss.ensure_active(many_chat, now=1000)
+
+    assert many["cultivator_count"] == bosses.WORLD_BOSS_FULL_HP_CULTIVATORS
+    assert many["total_hp"] == full_hp
+
+
+@pytest.mark.asyncio
+async def test_world_boss_tier_uses_known_group_cultivator_realms(temp_db):
+    chat_id = -3303
+    await world_boss.remember_chat(chat_id, "金丹群", now=1000)
+    for idx, realm in enumerate((1, 2, 2), start=1):
+        uid = 330300 + idx
+        await character.create(uid, f"tier{idx}")
+        await character.set_progress(uid, realm, 0, 0)
+        await world_boss.remember_cultivator(chat_id, uid, now=1000)
+
+    boss = await world_boss.ensure_active(chat_id, now=1000)
+
+    assert boss["boss_key"] == "jindan"
+    assert boss["cultivator_count"] == 3
+    assert boss["total_hp"] == int(round(
+        bosses.WORLD_BOSSES["jindan"]["total_hp"]
+        * 3 / bosses.WORLD_BOSS_FULL_HP_CULTIVATORS))
 
 
 @pytest.mark.asyncio

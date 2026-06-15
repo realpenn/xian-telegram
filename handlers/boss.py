@@ -73,6 +73,7 @@ async def cmd_boss(message: Message):
         await message.answer("世界 Boss 请在群中合击。")
         return
     await world_boss.remember_chat(message.chat.id, message.chat.title)
+    await world_boss.remember_cultivator(message.chat.id, message.from_user.id)
     await world_boss.ensure_active(message.chat.id)
     res = await world_boss.status(message.chat.id)
     markup = await _markup()

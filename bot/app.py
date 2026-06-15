@@ -23,6 +23,12 @@ class ActivityMiddleware(BaseMiddleware):
         if user and not getattr(user, "is_bot", False):
             username = user.username or user.full_name or str(user.id)
             await character.touch_activity(user.id, username)
+            chat = (data.get("event_chat") or getattr(event, "chat", None)
+                    or getattr(getattr(event, "message", None), "chat", None))
+            chat_type = str(getattr(chat, "type", "")).lower()
+            if chat and not (chat_type == "private" or chat_type.endswith(".private")):
+                await world_boss.remember_chat(chat.id, getattr(chat, "title", None))
+                await world_boss.remember_cultivator(chat.id, user.id)
         return await handler(event, data)
 
 _COMMANDS = [

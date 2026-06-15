@@ -5,8 +5,12 @@ import math
 import random
 import time
 
-from config.bosses import DEFAULT_BOSS, WORLD_BOSSES, boss_key_for_realm, canonical_boss_key
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+from config.bosses import (DEFAULT_BOSS, WORLD_BOSSES, WORLD_BOSS_FULL_HP_CULTIVATORS,
+                           boss_key_for_realm, canonical_boss_key)
 from config.items import item_name
+from handlers.common import action_callback_data
 from services import character
 from services.combat import Combatant, simulate
 from models import db
@@ -26,19 +30,70 @@ def _boss_cfg(key: str) -> dict:
     return WORLD_BOSSES[canonical_boss_key(key)]
 
 
-async def _select_tier(conn, chat_id: int) -> str:
-    """按本群历史挑战者的中位境界选择 Boss 档位（无历史→默认筑基档，#14）。"""
+def _tier_from_realms(realms: list[int]) -> str:
+    if not realms:
+        return DEFAULT_BOSS
+    return boss_key_for_realm(sorted(realms)[len(realms) // 2])
+
+
+def _scaled_total_hp(cfg: dict, cultivator_count: int) -> int:
+    count = max(1, cultivator_count)
+    scale = min(1.0, count / WORLD_BOSS_FULL_HP_CULTIVATORS)
+    return max(1, int(round(cfg["total_hp"] * scale)))
+
+
+async def remember_cultivator(chat_id: int, user_id: int, now: int = None) -> bool:
+    """记录本群已知修仙者；只有已创建角色的用户会计入 Boss 缩放。"""
+    now = int(time.time()) if now is None else now
+    if not await character.exists(user_id):
+        return False
+    await db.execute(
+        "INSERT INTO bot_chat_members(chat_id, user_id, last_seen_at) VALUES(?,?,?) "
+        "ON CONFLICT(chat_id, user_id) DO UPDATE SET last_seen_at=?",
+        (chat_id, user_id, now, now))
+    return True
+
+
+async def _known_group_realms(conn, chat_id: int) -> list[int]:
+    cur = await conn.execute(
+        "SELECT c.realm FROM bot_chat_members m "
+        "JOIN characters c ON c.user_id = m.user_id "
+        "WHERE m.chat_id = ?",
+        (chat_id,))
+    realms = [row["realm"] for row in await cur.fetchall()]
+    await cur.close()
+    return realms
+
+
+async def _historical_damage_realms(conn, chat_id: int) -> list[int]:
     cur = await conn.execute(
         "SELECT c.realm FROM world_boss_damage d "
         "JOIN world_boss b ON b.id = d.boss_id "
         "JOIN characters c ON c.user_id = d.user_id "
         "WHERE b.chat_id = ? ORDER BY b.id DESC LIMIT 50",
         (chat_id,))
-    realms = sorted(row["realm"] for row in await cur.fetchall())
+    realms = [row["realm"] for row in await cur.fetchall()]
     await cur.close()
+    return realms
+
+
+async def _select_tier(conn, chat_id: int) -> str:
+    """按本群已知修仙者中位境界选档；无记录时兼容历史挑战者，最后默认筑基档。"""
+    realms = await _known_group_realms(conn, chat_id)
     if not realms:
-        return DEFAULT_BOSS
-    return boss_key_for_realm(realms[len(realms) // 2])
+        realms = await _historical_damage_realms(conn, chat_id)
+    return _tier_from_realms(realms)
+
+
+async def _cultivator_count(conn, chat_id: int) -> int:
+    cur = await conn.execute(
+        "SELECT COUNT(*) AS n FROM bot_chat_members m "
+        "JOIN characters c ON c.user_id = m.user_id "
+        "WHERE m.chat_id = ?",
+        (chat_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    return int(row["n"] or 0)
 
 
 async def remember_chat(chat_id: int, title: str = None, now: int = None):
@@ -95,10 +150,12 @@ async def ensure_active(chat_id: int, now: int = None):
             return latest
         boss_key = await _select_tier(conn, chat_id)
         cfg = WORLD_BOSSES[boss_key]
+        cultivator_count = await _cultivator_count(conn, chat_id)
+        total_hp = _scaled_total_hp(cfg, cultivator_count)
         await conn.execute(
-            "INSERT INTO world_boss(chat_id, boss_key, total_hp, remaining_hp, spawn_at, expire_at, status) "
-            "VALUES(?,?,?,?,?,?, 'alive')",
-            (chat_id, boss_key, cfg["total_hp"], cfg["total_hp"], now, now + cfg["duration"]))
+            "INSERT INTO world_boss(chat_id, boss_key, total_hp, remaining_hp, spawn_at, expire_at, "
+            "status, cultivator_count) VALUES(?,?,?,?,?,?, 'alive', ?)",
+            (chat_id, boss_key, total_hp, total_hp, now, now + cfg["duration"], max(1, cultivator_count)))
         cur = await conn.execute(
             "SELECT * FROM world_boss WHERE chat_id=? AND status='alive' ORDER BY id DESC LIMIT 1",
             (chat_id,))
@@ -116,6 +173,15 @@ def broadcast_text(boss_row) -> str:
     )
 
 
+async def broadcast_markup() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="⚔️ 挑战 Boss",
+            callback_data=await action_callback_data(None, "boss:hit")),
+         InlineKeyboardButton(text="🐲 查看战况", callback_data="boss:status")]
+    ])
+
+
 async def scheduled_spawn(bot, now: int = None):
     spawned = []
     for chat in await known_chats():
@@ -123,16 +189,18 @@ async def scheduled_spawn(bot, now: int = None):
         if boss["status"] != "alive":
             continue
         text = broadcast_text(boss)
+        markup = await broadcast_markup()
         try:
             if boss["message_id"]:
                 await bot.edit_message_text(
-                    text=text, chat_id=chat["chat_id"], message_id=boss["message_id"])
+                    text=text, chat_id=chat["chat_id"], message_id=boss["message_id"],
+                    reply_markup=markup)
             else:
-                msg = await bot.send_message(chat["chat_id"], text)
+                msg = await bot.send_message(chat["chat_id"], text, reply_markup=markup)
                 await remember_message(boss["id"], msg.message_id)
         except Exception:
             try:
-                msg = await bot.send_message(chat["chat_id"], text)
+                msg = await bot.send_message(chat["chat_id"], text, reply_markup=markup)
                 await remember_message(boss["id"], msg.message_id)
             except Exception:
                 pass
@@ -165,6 +233,7 @@ async def _leaderboard(conn, boss_id: int, limit: int = 5):
 
 async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
+    await remember_cultivator(chat_id, user_id, now)
     boss = await ensure_active(chat_id, now)
     cfg = _boss_cfg(boss["boss_key"])
     if boss["status"] == "expired":

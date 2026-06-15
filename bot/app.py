@@ -14,6 +14,7 @@ from handlers import (bag, boss, craft, cultivate, daily, dungeon, explore,
 from handlers.common import cleanup_callback_tokens
 from models import db
 from services import character, notifications, world_boss
+from services import pvp as pvp_service
 
 
 class ActivityMiddleware(BaseMiddleware):
@@ -58,6 +59,8 @@ async def main():
     bot = Bot(token=token)
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(world_boss.scheduled_spawn, "cron", hour=20, minute=0, args=[bot])
+    # 周日 23:55（仍属当周 %W）结算 PvP 周榜奖池（#14）。
+    scheduler.add_job(pvp_service.settle_weekly, "cron", day_of_week="sun", hour=23, minute=55)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])
     scheduler.start()

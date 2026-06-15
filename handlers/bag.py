@@ -43,9 +43,12 @@ async def render_bag(user_id: int):
 def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "stamina_ok":
-        return f"服下补灵丹，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。"
+        suffix = f"（今日 {res.get('nth')}/{res['limit']} 次）" if res.get("limit") else ""
+        return f"服下补灵丹，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。{suffix}"
     if s == "stamina_full":
         return "精力已满，暂不必服用补灵丹。"
+    if s == "pill_limit":
+        return f"今日补灵丹已服 {res['limit']} 次，灵气紊乱，需待明日。"
     if s == "healed":
         return "服下疗伤丹，道基渐稳。"
     if s == "root_up":

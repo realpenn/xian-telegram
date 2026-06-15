@@ -6,10 +6,11 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import ITEMS, equipment_slot, item_name
+from config.equipment import QIHUN_KEY
 from config.skills import MIND_SLOT, skill_name
 from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
                              guard_private_callback, guard_private_message, main_menu, show)
-from services import character
+from services import character, equipment
 
 router = Router()
 
@@ -34,14 +35,32 @@ async def render_skills(user_id: int):
     ]
     rows = []
     if instances:
-        lines.append("—— 法宝 ——")
+        qihun = dict(inv).get(QIHUN_KEY, 0)
+        lines.append(f"—— 法宝 ——（器魂 ×{qihun}，可用于强化/重铸）")
         for inst in instances:
             mark = "已装备" if inst["equipped_slot"] else "未装备"
-            lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
-            if not inst["equipped_slot"] and equipment_slot(inst["base_key"]):
-                rows.append([InlineKeyboardButton(
-                    text=f"装备 {item_name(inst['base_key'])}",
-                    callback_data=await action_callback_data(user_id, f"equip:{inst['id']}"))])
+            lvl = inst.get("enhance_level", 0)
+            lvl_txt = f"+{lvl} " if lvl else ""
+            lines.append(
+                f"#{inst['id']} {lvl_txt}{item_name(inst['base_key'])}（{mark}，{_bonus_text(inst)}）")
+            if equipment_slot(inst["base_key"]):
+                if not inst["equipped_slot"]:
+                    rows.append([InlineKeyboardButton(
+                        text=f"装备 {item_name(inst['base_key'])}",
+                        callback_data=await action_callback_data(user_id, f"equip:{inst['id']}"))])
+                ops = [
+                    InlineKeyboardButton(
+                        text=f"强化#{inst['id']}",
+                        callback_data=await action_callback_data(user_id, f"eq:enhance:{inst['id']}")),
+                    InlineKeyboardButton(
+                        text=f"重铸#{inst['id']}",
+                        callback_data=await action_callback_data(user_id, f"eq:reforge:{inst['id']}")),
+                ]
+                if not inst["equipped_slot"]:
+                    ops.append(InlineKeyboardButton(
+                        text=f"分解#{inst['id']}",
+                        callback_data=await action_callback_data(user_id, f"eq:decompose:{inst['id']}")))
+                rows.append(ops)
     else:
         lines.append("尚无法宝实例，可由炼器或秘境获得。")
 
@@ -90,6 +109,58 @@ async def cb_skills(callback: CallbackQuery):
     text, markup = await render_skills(callback.from_user.id)
     await show(callback, text, markup)
     await callback.answer()
+
+
+def _eq_text(res: dict) -> str:
+    s = res["status"]
+    if s == "ok" and "level" in res:
+        c = res["cost"]
+        return f"{res['name']} 强化至 +{res['level']}（耗灵石 {c['stone']}、器魂 {c.get(QIHUN_KEY, 0)}）。"
+    if s == "ok" and "affixes" in res:
+        aff = "、".join(f"{k}+{v}" for k, v in res["affixes"].items()) or "无词条"
+        c = res["cost"]
+        return f"{res['name']} 重铸成功（耗灵石 {c['stone']}、器魂 {c.get(QIHUN_KEY, 0)}）。新词条：{aff}"
+    if s == "ok" and "qihun" in res:
+        return f"分解 {res['name']}，得器魂 ×{res['qihun']}。"
+    if s == "max":
+        return f"已至强化上限（+{res['level']}）。"
+    if s == "equipped":
+        return "装备中之物不可分解，请先卸下。"
+    if s == "no_stone":
+        return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
+    if s == "no_material":
+        return f"{res['item']} 不足（需 {res['need']}，余 {res['have']}）。"
+    if s == "not_equipment":
+        return "此物不可如此炼制。"
+    if s == "not_found":
+        return "未寻得此法宝。"
+    return "炼制未成。"
+
+
+async def _eq_op(callback: CallbackQuery, prefix: str, fn):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith(prefix):
+        return
+    res = await fn(callback.from_user.id, int(action.rsplit(":", 1)[1]))
+    await show(callback, _eq_text(res), main_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("eq:enhance:"))
+async def cb_enhance(callback: CallbackQuery):
+    await _eq_op(callback, "eq:enhance:", equipment.enhance)
+
+
+@router.callback_query(F.data.startswith("eq:reforge:"))
+async def cb_reforge(callback: CallbackQuery):
+    await _eq_op(callback, "eq:reforge:", equipment.reforge)
+
+
+@router.callback_query(F.data.startswith("eq:decompose:"))
+async def cb_decompose(callback: CallbackQuery):
+    await _eq_op(callback, "eq:decompose:", equipment.decompose)
 
 
 @router.callback_query(F.data.startswith("equip:"))

@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from handlers.common import action_callback_data, consume_action_callback, is_private_chat, show
-from config.bosses import WORLD_BOSSES
+from config.bosses import WORLD_BOSSES, canonical_boss_key
 from services import world_boss
 
 router = Router()
@@ -34,7 +34,7 @@ def _status_text(res: dict) -> str:
     if res["status"] == "none":
         return "今日暂无世界 Boss。发送 /boss 可唤出群内强敌。"
     boss = res["boss"]
-    cfg = WORLD_BOSSES[boss["boss_key"]]
+    cfg = WORLD_BOSSES[canonical_boss_key(boss["boss_key"])]
     pct = boss["remaining_hp"] / boss["total_hp"] if boss["total_hp"] else 0
     bar = "▰" * int(pct * 10) + "▱" * (10 - int(pct * 10))
     state = "已伏诛" if res["status"] == "defeated" else "已遁去" if res["status"] == "expired" else "鏖战中"

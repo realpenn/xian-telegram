@@ -39,6 +39,16 @@ _ANCHORS = {
 
 STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200}
 
+# 闭关每小阶目标时长（小时），按大境界配置（#15）。
+# 炼气小阶多、放快；金丹/元婴小阶少、放慢，抵消"高境界小阶少→整体推进偏快"。
+SECLUSION_STAGE_HOURS = {0: 16, 1: 24, 2: 36, 3: 48}
+_DEFAULT_SECLUSION_HOURS = 24
+
+
+def seclusion_stage_seconds(realm: int) -> int:
+    """当前大境界闭关填满一个小阶的目标秒数。"""
+    return SECLUSION_STAGE_HOURS.get(realm, _DEFAULT_SECLUSION_HOURS) * 3600
+
 
 def num_stages(realm: int) -> int:
     return len(REALM_STAGES[realm])

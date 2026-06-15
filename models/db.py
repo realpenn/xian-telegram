@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS characters (
     alchemy_prof  INTEGER NOT NULL DEFAULT 0,
     forge_prof    INTEGER NOT NULL DEFAULT 0,
     debuff_json   TEXT NOT NULL DEFAULT '{}',
+    stamina_buy_count   INTEGER NOT NULL DEFAULT 0,
+    stamina_buy_day     TEXT,
+    pill_stamina_count  INTEGER NOT NULL DEFAULT 0,
+    pill_stamina_day    TEXT,
     created_at    INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS inventory (
@@ -60,6 +64,7 @@ CREATE TABLE IF NOT EXISTS item_instances (
     base_key       TEXT NOT NULL,
     tier           TEXT NOT NULL,
     affixes_json   TEXT NOT NULL DEFAULT '{}',
+    enhance_level  INTEGER NOT NULL DEFAULT 0,
     equipped_slot  TEXT
 );
 CREATE TABLE IF NOT EXISTS recipes_known (
@@ -110,7 +115,15 @@ CREATE TABLE IF NOT EXISTS pvp_ratings (
     wins           INTEGER NOT NULL DEFAULT 0,
     losses         INTEGER NOT NULL DEFAULT 0,
     daily_count    INTEGER NOT NULL DEFAULT 0,
-    daily_reset_at INTEGER NOT NULL DEFAULT 0
+    daily_reset_at INTEGER NOT NULL DEFAULT 0,
+    week_reputation INTEGER NOT NULL DEFAULT 0,
+    week_tag       TEXT
+);
+CREATE TABLE IF NOT EXISTS pvp_daily_pairs (
+    u1   INTEGER NOT NULL,
+    u2   INTEGER NOT NULL,
+    day  TEXT NOT NULL,
+    PRIMARY KEY (u1, u2, day)
 );
 CREATE TABLE IF NOT EXISTS world_boss (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -142,6 +155,8 @@ CREATE TABLE IF NOT EXISTS sect_members (
     user_id       INTEGER NOT NULL,
     role          TEXT NOT NULL,
     contribution  INTEGER NOT NULL DEFAULT 0,
+    donate_day    TEXT,
+    donate_today  INTEGER NOT NULL DEFAULT 0,
     joined_at     INTEGER NOT NULL,
     PRIMARY KEY (user_id)
 );
@@ -188,8 +203,17 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "alchemy_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "forge_prof", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "debuff_json", "TEXT NOT NULL DEFAULT '{}'")
+    await _ensure_column(_conn, "characters", "stamina_buy_count", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "stamina_buy_day", "TEXT")
+    await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "pvp_ratings", "week_reputation", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "pvp_ratings", "week_tag", "TEXT")
+    await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
+    await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
+    await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "explore_runs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "explore_runs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")

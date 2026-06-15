@@ -107,9 +107,15 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
                 "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
                 (stamina, stamina_at, user_id))
             return {"status": "no_stamina", "need": total_cost, "have": stamina}
+        fee = d.get("entry_stone", 0)
+        if fee and row["spirit_stone"] < fee:
+            await conn.execute(
+                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+                (stamina, stamina_at, user_id))
+            return {"status": "no_entry_fee", "need": fee, "have": row["spirit_stone"]}
         await conn.execute(
-            "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-            (stamina - total_cost, stamina_at, user_id))
+            "UPDATE characters SET stamina=?, stamina_at=?, spirit_stone=spirit_stone-? WHERE user_id=?",
+            (stamina - total_cost, stamina_at, fee, user_id))
         await conn.execute(
             "INSERT INTO dungeon_runs(user_id, dungeon_key, day, runs) VALUES(?,?,?,1) "
             "ON CONFLICT(user_id, dungeon_key, day) DO UPDATE SET runs = runs + 1",
@@ -127,6 +133,7 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
             "finish_at": finish_at,
             "seconds": DUNGEON_DURATION_SECONDS,
             "stamina_left": stamina - total_cost,
+            "entry_fee": fee,
         }
 
 

@@ -101,12 +101,15 @@ async def test_sect_leader_can_upgrade_with_contribution_pool(temp_db):
     await character.add_stone(uid, 500)
     assert (await sect.create(uid, "升阶宗", now=1000))["status"] == "ok"
     await db.execute("UPDATE sects SET contribution_pool=100 WHERE leader_user_id=?", (uid,))
+    await character.add_stone(uid, 500)  # 升级在贡献池外另耗灵石（#13）
 
+    before_stone = (await character.get(uid)).spirit_stone
     res = await sect.upgrade(uid)
     mine = await sect.my_sect(uid)
 
     assert res["status"] == "upgraded"
     assert mine["level"] == 2
+    assert (await character.get(uid)).spirit_stone == before_stone - res["stone_cost"]
 
 
 def test_root_bone_roll_stays_in_spec_range():
@@ -233,6 +236,7 @@ async def test_ready_action_notifications_are_sent_once(temp_db):
     await character.create(delver, "delver")
     await character.set_progress(explorer, 3, 0, 0)
     await character.set_progress(delver, 3, 0, 0)
+    await character.add_stone(delver, 500)  # 秘境入场费（#13）
     await db.execute(
         "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id IN (?,?)",
         (200, 1000, explorer, delver))
@@ -397,9 +401,10 @@ async def test_temporary_pill_buff_improves_seclusion_gain(temp_db):
 async def test_split_seclusion_sessions_accumulate_to_one_stage(temp_db):
     uid = 4028
     await character.create(uid, "tester")
-    await character.set_progress(uid, 0, 3, 0)
+    # 用筑基档（小阶 24h，恰为离线上限 12h 的两倍）验证分段闭关无损累计（#15）。
+    await character.set_progress(uid, 1, 0, 0)
     await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
-    cost = R.advance_cost(0, 3)
+    cost = R.advance_cost(1, 0)
 
     await character.start_seclusion(uid, now=1000)
     first = await character.collect_seclusion(uid, now=1000 + 12 * 3600)
@@ -417,15 +422,17 @@ async def test_spirit_stones_can_buy_stamina(temp_db):
     await character.create(uid, "tester")
     await db.execute(
         "UPDATE characters SET stamina=0, stamina_at=?, spirit_stone=? WHERE user_id=?",
-        (1000, 100, uid))
+        (1000, 1000, uid))
 
     res = await shop.buy_stamina(uid, now=1000)
     row = await db.fetchone("SELECT stamina, spirit_stone FROM characters WHERE user_id=?", (uid,))
 
+    cost1 = shop.stamina_buy_cost(0, 1)
     assert res["status"] == "stamina_ok"
-    assert res["gain"] == shop.STAMINA_STONE_GAIN
-    assert row["stamina"] == shop.STAMINA_STONE_GAIN
-    assert row["spirit_stone"] == 100 - shop.STAMINA_STONE_COST
+    assert res["gain"] == shop.STAMINA_BUY_GAIN
+    assert res["cost"] == cost1
+    assert row["stamina"] == shop.STAMINA_BUY_GAIN
+    assert row["spirit_stone"] == 1000 - cost1
 
 
 @pytest.mark.asyncio

@@ -35,8 +35,10 @@ def test_regen_already_full():
 
 
 def test_seclusion_offline_cap():
+    # 离线上限 12h；炼气小阶目标 16h（#15），故封顶一次约推进 12/16 = 3/4 小阶。
     g = settle.seclusion_gain(0, 0, 0, 100 * 3600, place_factor=1.0)
-    assert g == R.advance_cost(0, 0) // 2
+    expected = R.advance_cost(0, 0) * (settle.OFFLINE_CAP_HOURS * 3600) // R.seclusion_stage_seconds(0)
+    assert g == expected
 
 
 def test_seclusion_negative_elapsed():
@@ -60,10 +62,11 @@ def test_seclusion_half_hour_is_below_first_advance_cost():
 
 
 def test_two_twelve_hour_sessions_equal_one_stage_with_remainder():
-    cost = R.advance_cost(0, 1)
-    first, remainder = settle.seclusion_gain_with_remainder(0, 1, 0, 12 * 3600)
+    # 筑基小阶目标 24h（#15），恰为离线上限 12h 的两倍：两段离线无损凑满一小阶。
+    cost = R.advance_cost(1, 1)
+    first, remainder = settle.seclusion_gain_with_remainder(1, 1, 0, 12 * 3600)
     second, remainder = settle.seclusion_gain_with_remainder(
-        0, 1, 0, 12 * 3600, remainder_units=remainder)
+        1, 1, 0, 12 * 3600, remainder_units=remainder)
 
     assert first + second == cost
     assert remainder == 0

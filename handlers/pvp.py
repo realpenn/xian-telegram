@@ -21,11 +21,14 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
         attacker = res.get("attacker_name", "道友")
         defender = res.get("defender_name", opponent_name)
         shown = res["log"] if len(res["log"]) <= 8 else (res["log"][:7] + ["……", res["log"][-1]])
+        rep_txt = (f"声望 +{res['reputation_gain']}" if res.get("reputation_counted", True)
+                   else "声望 +0（今日已与此对手切磋）")
+        tier_txt = f"（{res['tier']}）" if res.get("tier") else ""
         return "\n".join([
             f"⚔️ 切磋：{attacker} vs {defender}",
             *shown,
-            f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}，"
-            f"声望 +{res['reputation_gain']}。",
+            f"{'技高一筹' if res['win'] else '惜败半招'}，天梯积分 {res['rating_delta']:+d}{tier_txt}，"
+            f"{rep_txt}。周榜奖池按声望排名结算。",
         ])
     if s == "no_opponent":
         return "暂未寻得合适对手。可让另一位道友先 /start。"

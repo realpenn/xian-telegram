@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import item_name
-from config.sects import CREATE_STONE_COST, SECT_SHOP, upgrade_cost
+from config.sects import CREATE_STONE_COST, SECT_SHOP, upgrade_cost, upgrade_stone_cost
 from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
                              main_menu, show)
 from services import sect
@@ -38,7 +38,8 @@ async def render_sect(user_id: int):
             callback_data=await action_callback_data(user_id, "sect:task"))])
         if mine["role"] == "宗主":
             rows.append([InlineKeyboardButton(
-                text=f"⬆️ 升级宗门（贡献池 {upgrade_cost(mine['level'])}）",
+                text=(f"⬆️ 升级宗门（贡献池 {upgrade_cost(mine['level'])}"
+                      f" + 灵石 {upgrade_stone_cost(mine['level'])}）"),
                 callback_data=await action_callback_data(user_id, "sect:upgrade"))])
         rows.append([InlineKeyboardButton(text="🏪 宗门商店", callback_data="sect:shop")])
     rows += main_menu().inline_keyboard
@@ -47,12 +48,21 @@ async def render_sect(user_id: int):
 
 def _result_text(res: dict) -> str:
     s = res["status"]
+    if s == "ok" and "cap_left" in res:
+        return f"捐输 {res['stone']} 灵石，得贡献 +{res['contribution']}（今日还可换 {res['cap_left']}）。"
     if s == "ok" and "contribution" in res:
         return f"宗门任务完成，贡献 +{res['contribution']}，灵石 +{res['stone']}。"
     if s == "ok" and "item" in res:
         return f"兑换 {res['item']}×{res['qty']}，消耗贡献 {res['cost']}。"
     if s == "upgraded":
-        return f"宗门「{res['name']}」升至 Lv.{res['level']}，消耗贡献池 {res['cost']}。"
+        return (f"宗门「{res['name']}」升至 Lv.{res['level']}，"
+                f"消耗贡献池 {res['cost']} + 灵石 {res['stone_cost']}。")
+    if s == "donate_cap":
+        return f"今日捐输已达上限（{res['cap']} 贡献），明日再来。"
+    if s == "too_little":
+        return f"灵石太少，至少 {res['per']} 灵石可换 1 贡献。"
+    if s == "bad_amount":
+        return "请指定要捐输的灵石数，如 /sect donate 100。"
     if s == "ok" and "name" in res:
         return f"已入宗门「{res['name']}」。"
     if s == "ok":
@@ -103,6 +113,10 @@ async def cmd_sect(message: Message):
         return
     if len(parts) >= 2 and parts[1] == "upgrade":
         await message.answer(_result_text(await sect.upgrade(message.from_user.id)))
+        return
+    if len(parts) >= 2 and parts[1] == "donate":
+        amount = int(parts[2]) if len(parts) >= 3 and parts[2].isdigit() else 0
+        await message.answer(_result_text(await sect.donate(message.from_user.id, amount)))
         return
     if len(parts) >= 3 and parts[1] == "buy":
         await message.answer(_result_text(await sect.redeem(message.from_user.id, parts[2])))

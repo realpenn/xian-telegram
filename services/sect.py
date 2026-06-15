@@ -4,8 +4,9 @@ from __future__ import annotations
 import time
 
 from config.items import item_name
-from config.sects import (CREATE_REALM, CREATE_STONE_COST, SECT_SHOP, TASK_CONTRIBUTION,
-                          TASK_STONE_REWARD, upgrade_cost)
+from config.sects import (CREATE_REALM, CREATE_STONE_COST, DONATE_DAILY_CONTRIBUTION_CAP,
+                          DONATE_STONE_PER_CONTRIBUTION, SECT_SHOP, TASK_CONTRIBUTION,
+                          TASK_STONE_REWARD, upgrade_cost, upgrade_stone_cost)
 from models import db
 
 
@@ -153,6 +154,45 @@ async def redeem(user_id: int, item_key: str) -> dict:
                 "cost": good["contribution"]}
 
 
+async def donate(user_id: int, stone: int, now: int = None) -> dict:
+    """捐灵石换少量贡献（每日封顶）：一条可重复的灵石 sink（#13）。"""
+    now = int(time.time()) if now is None else now
+    day = _day(now)
+    if stone <= 0:
+        return {"status": "bad_amount"}
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT m.sect_id, m.donate_day, m.donate_today, c.spirit_stone "
+            "FROM sect_members m JOIN characters c ON c.user_id=m.user_id WHERE m.user_id=?",
+            (user_id,))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row:
+            return {"status": "not_member"}
+        done_today = row["donate_today"] if row["donate_day"] == day else 0
+        cap_left = DONATE_DAILY_CONTRIBUTION_CAP - done_today
+        if cap_left <= 0:
+            return {"status": "donate_cap", "cap": DONATE_DAILY_CONTRIBUTION_CAP}
+        gain = min(stone // DONATE_STONE_PER_CONTRIBUTION, cap_left)
+        if gain <= 0:
+            return {"status": "too_little", "per": DONATE_STONE_PER_CONTRIBUTION}
+        spend = gain * DONATE_STONE_PER_CONTRIBUTION
+        if row["spirit_stone"] < spend:
+            return {"status": "no_stone", "need": spend, "have": row["spirit_stone"]}
+        await conn.execute(
+            "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
+            (spend, user_id))
+        await conn.execute(
+            "UPDATE sect_members SET contribution=contribution+?, donate_today=?, donate_day=? "
+            "WHERE user_id=?",
+            (gain, done_today + gain, day, user_id))
+        await conn.execute(
+            "UPDATE sects SET contribution_pool = contribution_pool + ? WHERE id=?",
+            (gain, row["sect_id"]))
+        return {"status": "ok", "stone": spend, "contribution": gain,
+                "cap_left": cap_left - gain}
+
+
 async def upgrade(user_id: int) -> dict:
     async with db.transaction() as conn:
         cur = await conn.execute(
@@ -168,11 +208,22 @@ async def upgrade(user_id: int) -> dict:
         cost = upgrade_cost(row["level"])
         if row["contribution_pool"] < cost:
             return {"status": "no_pool", "need": cost, "have": row["contribution_pool"]}
+        # 升级在贡献池外另耗宗主灵石（#13 灵石 sink）。
+        stone_cost = upgrade_stone_cost(row["level"])
+        cur = await conn.execute(
+            "SELECT spirit_stone FROM characters WHERE user_id=?", (user_id,))
+        ch = await cur.fetchone()
+        await cur.close()
+        if ch["spirit_stone"] < stone_cost:
+            return {"status": "no_stone", "need": stone_cost, "have": ch["spirit_stone"]}
         await conn.execute(
             "UPDATE sects SET level=level+1, contribution_pool=contribution_pool-? WHERE id=?",
             (cost, row["id"]))
+        await conn.execute(
+            "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
+            (stone_cost, user_id))
         return {"status": "upgraded", "name": row["name"], "level": row["level"] + 1,
-                "cost": cost}
+                "cost": cost, "stone_cost": stone_cost}
 
 
 async def members(sect_id: int, limit: int = 10):

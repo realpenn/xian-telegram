@@ -29,3 +29,13 @@ def welfare(level: int) -> dict:
 
 def upgrade_cost(level: int) -> int:
     return max(LEVEL_UP_COST, level * LEVEL_UP_COST)
+
+
+# 灵石长线 sink（#13）：个人捐灵石换少量贡献（每日封顶）；升级在贡献池外另耗宗主灵石。
+DONATE_STONE_PER_CONTRIBUTION = 10
+DONATE_DAILY_CONTRIBUTION_CAP = 50
+UPGRADE_STONE_COST_PER_LEVEL = 200
+
+
+def upgrade_stone_cost(level: int) -> int:
+    return level * UPGRADE_STONE_COST_PER_LEVEL

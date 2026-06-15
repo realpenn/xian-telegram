@@ -13,9 +13,30 @@ DAILY_LIMIT = 10
 WIN_REPUTATION = 3
 LOSS_REPUTATION = 1
 
+# 周结算奖池（#14）：取代即时发灵石，按本周有效声望排名发放。
+WEEKLY_POOL_STONE = 6000
+_WEEKLY_HEAD_SHARES = [0.30, 0.20, 0.14, 0.10, 0.08]  # 头部 5 名，余额均分其余有效参与者
+
 
 def _day(ts: int) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def _week(ts: int) -> str:
+    return time.strftime("%Y-%W", time.localtime(ts))
+
+
+def _weekly_share(idx: int, n: int) -> float:
+    if n <= 0:
+        return 0.0
+    head_count = min(n, len(_WEEKLY_HEAD_SHARES))
+    if n <= len(_WEEKLY_HEAD_SHARES):
+        total = sum(_WEEKLY_HEAD_SHARES[:head_count])
+        return _WEEKLY_HEAD_SHARES[idx] / total if total else 0.0
+    if idx < len(_WEEKLY_HEAD_SHARES):
+        return _WEEKLY_HEAD_SHARES[idx]
+    rest = n - len(_WEEKLY_HEAD_SHARES)
+    return (1.0 - sum(_WEEKLY_HEAD_SHARES)) / rest if rest > 0 else 0.0
 
 
 def _expected(ra: int, rb: int) -> float:
@@ -176,33 +197,76 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
     result = simulate(a, d, seed=random.getrandbits(32))
     attacker_win = result["winner"] is a
 
+    week = _week(now)
     async with db.transaction() as conn:
         ar = await _rating(conn, attacker_id)
         dr = await _rating(conn, defender_id)
         score = 1.0 if attacker_win else 0.0
         change = _delta(ar["rating"], dr["rating"], score)
         defender_change = _delta(dr["rating"], ar["rating"], 1.0 - score)
-        attacker_rep = WIN_REPUTATION if attacker_win else LOSS_REPUTATION
-        defender_rep = LOSS_REPUTATION if attacker_win else WIN_REPUTATION
+        # 同一对手每日只计一次有效声望，降低互刷价值（积分仍照常变动，零和不通胀）。
+        u1, u2 = sorted((attacker_id, defender_id))
+        cur = await conn.execute(
+            "SELECT 1 FROM pvp_daily_pairs WHERE u1=? AND u2=? AND day=?", (u1, u2, day))
+        dup = await cur.fetchone()
+        await cur.close()
+        rep_counts = dup is None
+        if rep_counts:
+            await conn.execute(
+                "INSERT OR IGNORE INTO pvp_daily_pairs(u1, u2, day) VALUES(?,?,?)", (u1, u2, day))
+        attacker_rep = (WIN_REPUTATION if attacker_win else LOSS_REPUTATION) if rep_counts else 0
+        defender_rep = (LOSS_REPUTATION if attacker_win else WIN_REPUTATION) if rep_counts else 0
+        a_week = (ar["week_reputation"] if ar["week_tag"] == week else 0) + attacker_rep
+        d_week = (dr["week_reputation"] if dr["week_tag"] == week else 0) + defender_rep
         await conn.execute(
-            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+? "
-            "WHERE user_id=?",
+            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+?, "
+            "week_reputation=?, week_tag=? WHERE user_id=?",
             (max(0, ar["rating"] + change), attacker_rep, 1 if attacker_win else 0,
-             0 if attacker_win else 1, attacker_id))
+             0 if attacker_win else 1, a_week, week, attacker_id))
         await conn.execute(
-            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+? "
-            "WHERE user_id=?",
+            "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+?, "
+            "week_reputation=?, week_tag=? WHERE user_id=?",
             (max(0, dr["rating"] + defender_change), defender_rep, 0 if attacker_win else 1,
-             1 if attacker_win else 0, defender_id))
-        await conn.execute(
-            "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
-            (20 if attacker_win else 5, attacker_id))
+             1 if attacker_win else 0, d_week, week, defender_id))
+        # 不再即时发放灵石：移除无成本 faucet，改由 settle_weekly 按排名发奖池（#14）。
 
     return {"status": "ok", "win": attacker_win, "rating_delta": change,
-            "reputation_gain": WIN_REPUTATION if attacker_win else LOSS_REPUTATION,
+            "reputation_gain": attacker_rep, "reputation_counted": rep_counts,
+            "tier": tier(max(0, ar["rating"] + change)),
             "defender_id": defender_id, "log": result["log"],
             "rounds": result["rounds"],
             "attacker_name": attacker_name, "defender_name": defender_name}
+
+
+async def settle_weekly(now: int = None, pool: int = WEEKLY_POOL_STONE) -> list:
+    """按本周有效声望排名发放奖池灵石，并清零本周声望（#14）。由调度周期调用。"""
+    now = int(time.time()) if now is None else now
+    week = _week(now)
+    results = []
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT user_id, week_reputation FROM pvp_ratings "
+            "WHERE week_tag=? AND week_reputation>0 ORDER BY week_reputation DESC, rating DESC",
+            (week,))
+        rows = await cur.fetchall()
+        await cur.close()
+        n = len(rows)
+        if n == 0:
+            return results
+        payouts = [int(pool * _weekly_share(idx, n)) for idx in range(n)]
+        for idx in range(pool - sum(payouts)):
+            payouts[idx % n] += 1
+        for idx, row in enumerate(rows):
+            stone = payouts[idx]
+            if stone > 0:
+                await conn.execute(
+                    "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
+                    (stone, row["user_id"]))
+            results.append({"user_id": row["user_id"], "rank": idx + 1,
+                            "stone": stone, "reputation": row["week_reputation"]})
+        await conn.execute(
+            "UPDATE pvp_ratings SET week_reputation=0 WHERE week_tag=?", (week,))
+    return results
 
 
 async def top(limit: int = 10):

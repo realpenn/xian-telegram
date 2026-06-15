@@ -15,6 +15,7 @@ ITEMS = {
     "兽皮":   {"name": "妖兽皮",   "type": "material", "sell": 5},
     "妖丹":   {"name": "妖丹",     "type": "material", "sell": 18},
     "天材地宝": {"name": "天材地宝", "type": "material", "sell": 80},
+    "器魂":   {"name": "器魂",     "type": "material", "sell": 6},
     "疗伤丹": {"name": "疗伤丹",   "type": "pill", "sell": 20},
     "补灵丹": {"name": "补灵丹",   "type": "pill", "sell": 20},
     "虎力丹": {"name": "虎力丹",   "type": "pill", "sell": 35, "use": "buff",

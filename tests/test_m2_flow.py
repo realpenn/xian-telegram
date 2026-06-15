@@ -121,6 +121,7 @@ async def test_dungeon_daily_limit_and_rewards(temp_db):
     uid = 2004
     await character.create(uid, "tester")
     await character.set_progress(uid, 3, 0, 0)
+    await character.add_stone(uid, 2000)  # 秘境入场费（#13）
     await db.execute(
         "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
         (200, 1000, uid))
@@ -187,6 +188,7 @@ async def test_each_realm_can_start_and_collect_its_dungeon(temp_db):
         uid = 2020 + realm
         await character.create(uid, f"tester-{realm}")
         await character.set_progress(uid, realm, 0, 0)
+        await character.add_stone(uid, 1000)  # 秘境入场费（#13）
         await db.execute(
             "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
             (R.STAMINA_CAP[realm], 1000, uid))

@@ -1,10 +1,11 @@
-"""世界 Boss lite：群实例、累计伤害、贡献奖励（spec §5.3）。"""
+"""世界 Boss lite：群实例、累计伤害、贡献奖励（spec §5.3；分档与奖励重做 #14）。"""
 from __future__ import annotations
 
+import math
 import random
 import time
 
-from config.bosses import DEFAULT_BOSS, WORLD_BOSSES
+from config.bosses import DEFAULT_BOSS, WORLD_BOSSES, boss_key_for_realm, canonical_boss_key
 from config.items import item_name
 from services import character
 from services.combat import Combatant, simulate
@@ -16,9 +17,28 @@ def _day(ts: int) -> str:
 
 
 def _boss_combatant(key: str) -> Combatant:
-    src = WORLD_BOSSES[key]["combat"]
+    src = _boss_cfg(key)["combat"]
     return Combatant(name=src["name"], hp=src["hp"], mp=src["mp"], atk=src["atk"],
                      df=src["df"], spd=src["spd"], crit=src["crit"], skills=list(src["skills"]))
+
+
+def _boss_cfg(key: str) -> dict:
+    return WORLD_BOSSES[canonical_boss_key(key)]
+
+
+async def _select_tier(conn, chat_id: int) -> str:
+    """按本群历史挑战者的中位境界选择 Boss 档位（无历史→默认筑基档，#14）。"""
+    cur = await conn.execute(
+        "SELECT c.realm FROM world_boss_damage d "
+        "JOIN world_boss b ON b.id = d.boss_id "
+        "JOIN characters c ON c.user_id = d.user_id "
+        "WHERE b.chat_id = ? ORDER BY b.id DESC LIMIT 50",
+        (chat_id,))
+    realms = sorted(row["realm"] for row in await cur.fetchall())
+    await cur.close()
+    if not realms:
+        return DEFAULT_BOSS
+    return boss_key_for_realm(realms[len(realms) // 2])
 
 
 async def remember_chat(chat_id: int, title: str = None, now: int = None):
@@ -48,7 +68,7 @@ async def _active_row(conn, chat_id: int, now: int):
     await cur.close()
     if row and row["expire_at"] <= now:
         await conn.execute("UPDATE world_boss SET status='expired' WHERE id=?", (row["id"],))
-        await _distribute(conn, row["id"], WORLD_BOSSES[row["boss_key"]])
+        await _distribute(conn, row["id"], _boss_cfg(row["boss_key"]))
         return None
     return row
 
@@ -73,11 +93,12 @@ async def ensure_active(chat_id: int, now: int = None):
         latest = await _latest_today(conn, chat_id, now)
         if latest:
             return latest
-        cfg = WORLD_BOSSES[DEFAULT_BOSS]
+        boss_key = await _select_tier(conn, chat_id)
+        cfg = WORLD_BOSSES[boss_key]
         await conn.execute(
             "INSERT INTO world_boss(chat_id, boss_key, total_hp, remaining_hp, spawn_at, expire_at, status) "
             "VALUES(?,?,?,?,?,?, 'alive')",
-            (chat_id, DEFAULT_BOSS, cfg["hp"], cfg["hp"], now, now + cfg["duration"]))
+            (chat_id, boss_key, cfg["total_hp"], cfg["total_hp"], now, now + cfg["duration"]))
         cur = await conn.execute(
             "SELECT * FROM world_boss WHERE chat_id=? AND status='alive' ORDER BY id DESC LIMIT 1",
             (chat_id,))
@@ -87,7 +108,7 @@ async def ensure_active(chat_id: int, now: int = None):
 
 
 def broadcast_text(boss_row) -> str:
-    cfg = WORLD_BOSSES[boss_row["boss_key"]]
+    cfg = _boss_cfg(boss_row["boss_key"])
     return (
         f"🐲 世界 Boss「{cfg['name']}」现世！\n"
         f"气血 {boss_row['remaining_hp']}/{boss_row['total_hp']}，持续 2 小时。\n"
@@ -145,7 +166,7 @@ async def _leaderboard(conn, boss_id: int, limit: int = 5):
 async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     boss = await ensure_active(chat_id, now)
-    cfg = WORLD_BOSSES[boss["boss_key"]]
+    cfg = _boss_cfg(boss["boss_key"])
     if boss["status"] == "expired":
         return {"status": "expired"}
     if boss["status"] == "defeated":
@@ -198,33 +219,48 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
 
 
 async def _distribute(conn, boss_id: int, cfg: dict):
+    """参与奖 + 软化分层贡献奖 + 榜首小额额外奖；稀有掉落分摊给前列而非独归榜首（#14）。"""
     cur = await conn.execute(
         "SELECT user_id, damage FROM world_boss_damage WHERE boss_id=? ORDER BY damage DESC",
         (boss_id,))
     rows = await cur.fetchall()
     await cur.close()
-    total = sum(row["damage"] for row in rows) or 1
+    n = len(rows)
+    if n == 0:
+        return []
+    pool = cfg["stone_pool"]
+    # 参与奖：均分 25% 池，到场即有收益。
+    participation = max(10, int(pool * 0.25 / n))
+    remaining = max(0, pool - participation * n)
+    # 贡献奖：按伤害平方根加权，压缩头尾差距，抑制强者滚雪球。
+    weights = [math.sqrt(max(1, row["damage"])) for row in rows]
+    wsum = sum(weights) or 1.0
+    # 稀有掉落分摊给前 1/3，避免稀有奖励只集中在榜首。
+    top_k = max(1, n // 3)
+    drops_each = {k: max(1, v // top_k) for k, v in cfg["drops"].items()}
     rewards = []
     for idx, row in enumerate(rows):
-        stone = max(10, int(cfg["stone_pool"] * row["damage"] / total))
+        stone = participation + int(remaining * weights[idx] / wsum)
+        if idx == 0:
+            stone += int(pool * 0.05)  # 榜首小额额外奖（5%）。
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (stone, row["user_id"]))
-        drops = {}
-        if idx == 0:
-            drops = cfg["drops"]
-            for key, qty in drops.items():
-                await conn.execute(
-                    "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-                    "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
-                    (row["user_id"], key, qty, qty))
-        rewards.append({"user_id": row["user_id"], "stone": stone, "drops": drops})
+        drops = dict(drops_each) if idx < top_k else {}
+        for key, qty in drops.items():
+            await conn.execute(
+                "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
+                "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+                (row["user_id"], key, qty, qty))
+        rewards.append({"user_id": row["user_id"], "stone": stone, "drops": drops,
+                        "rank": idx + 1})
     return rewards
 
 
 def reward_text(rewards: list) -> str:
     if not rewards:
         return ""
-    first = rewards[0]
-    drops = "、".join(f"{item_name(k)}×{v}" for k, v in first["drops"].items())
-    return f"击杀奖励已结算，榜首额外得 {drops}。" if drops else "击杀奖励已结算。"
+    top = rewards[0]
+    drops = "、".join(f"{item_name(k)}×{v}" for k, v in top["drops"].items())
+    base = f"击杀奖励已结算，{len(rewards)} 位道友按贡献分润灵石"
+    return base + (f"，前列另得 {drops}。" if drops else "。")

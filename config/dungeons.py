@@ -9,7 +9,7 @@ def _mob(name, hp, atk, df, spd, crit, skills=("普攻",)):
 
 DUNGEONS = {
     "lingxi": {
-        "name": "灵溪洞", "realm": 0, "layers": 3, "stamina": 33,
+        "name": "灵溪洞", "realm": 0, "layers": 3, "stamina": 33, "entry_stone": 0,
         "stone": (20, 45), "cult": 10,
         "mobs": [
             _mob("洞中灵狐", 150, 18, 10, 16, 4),
@@ -24,8 +24,8 @@ DUNGEONS = {
         ],
     },
     "xuanming": {
-        "name": "玄冥矿窟", "realm": 1, "layers": 4, "stamina": 40,
-        "stone": (70, 130), "cult": 40,
+        "name": "玄冥矿窟", "realm": 1, "layers": 4, "stamina": 40, "entry_stone": 80,
+        "stone": (70, 130), "cult": 20,
         "mobs": [
             _mob("矿窟铁蛛", 650, 70, 45, 42, 12),
             _mob("玄铁傀儡", 760, 78, 55, 30, 9, ("普攻", "金钟罩")),
@@ -41,8 +41,8 @@ DUNGEONS = {
         ],
     },
     "qingyun": {
-        "name": "青云秘境", "realm": 2, "layers": 5, "stamina": 50,
-        "stone": (180, 300), "cult": 300,
+        "name": "青云秘境", "realm": 2, "layers": 5, "stamina": 50, "entry_stone": 300,
+        "stone": (180, 300), "cult": 100,
         "mobs": [
             _mob("秘境石傀", 2300, 230, 150, 90, 30),
             _mob("青云剑影", 2200, 250, 120, 115, 36, ("普攻", "快剑斩")),
@@ -61,8 +61,8 @@ DUNGEONS = {
         ],
     },
     "tianxu": {
-        "name": "天墟古阵", "realm": 3, "layers": 5, "stamina": 66,
-        "stone": (420, 760), "cult": 2500,
+        "name": "天墟古阵", "realm": 3, "layers": 5, "stamina": 66, "entry_stone": 800,
+        "stone": (420, 760), "cult": 600,
         "mobs": [
             _mob("天墟残魂", 6200, 540, 380, 190, 65, ("普攻", "烈火诀")),
             _mob("古阵魔将", 7000, 620, 430, 220, 80, ("普攻", "快剑斩")),

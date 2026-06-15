@@ -18,11 +18,22 @@ async def render_dungeon(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
+    active = await dungeon.active_run(user_id)
+    if active:
+        rows = [[InlineKeyboardButton(
+            text="领取结算" if active["status"] == "ready" else "刷新进度",
+            callback_data=await action_callback_data(user_id, "dg:collect"))]]
+        rows += main_menu().inline_keyboard
+        if active["status"] == "ready":
+            text = f"🏯 {active['dungeon']} 已探索完成，可领取结算。"
+        else:
+            text = f"🏯 正在探索 {active['dungeon']}，约 {_minutes(active['remaining'])} 后完成。"
+        return text, InlineKeyboardMarkup(inline_keyboard=rows)
     rows = []
-    lines = ["🏯 秘境", "每日每处秘境可入 1 次。"]
+    lines = ["🏯 秘境", f"每日每处秘境最多可入 {dungeon.DUNGEON_DAILY_LIMIT} 次。"]
     for key, d in DUNGEONS.items():
         state = "可入" if char.realm >= d["realm"] else "未解锁"
-        lines.append(f"{d['name']}：{d['layers']} 层，每层精力 {d['stamina']}（{state}）")
+        lines.append(f"{d['name']}：{d['layers']} 层，精力 {d['stamina']}，约30分钟（{state}）")
         if char.realm >= d["realm"]:
             rows.append([InlineKeyboardButton(
                 text=f"进入 {d['name']}",
@@ -31,12 +42,36 @@ async def render_dungeon(user_id: int):
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+async def _active_markup(user_id: int) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(
+        text="领取 / 刷新秘境",
+        callback_data=await action_callback_data(user_id, "dg:collect"))]]
+    rows += main_menu().inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _minutes(seconds: int) -> str:
+    minutes = max(1, (seconds + 59) // 60)
+    return f"{minutes} 分钟"
+
+
 def _result_text(res: dict) -> str:
     s = res["status"]
+    if s == "started":
+        return (
+            f"🏯 已进入 {res['dungeon']}，预计 {_minutes(res['seconds'])} 后完成。\n"
+            f"⚡ 精力余 {res['stamina_left']}"
+        )
+    if s == "pending":
+        return f"🏯 正在探索 {res['dungeon']}，约 {_minutes(res['remaining'])} 后完成。"
+    if s == "ready":
+        return f"🏯 {res['dungeon']} 已探索完成，请领取结算。"
+    if s == "no_active":
+        return "当前没有正在探索的秘境。"
     if s == "locked":
         return f"秘境云封雾锁，需至 {res['need']} 方可入内。"
     if s == "daily_done":
-        return "今日已探过此秘境，且待明日。"
+        return f"今日此秘境次数已用尽（{res.get('limit', dungeon.DUNGEON_DAILY_LIMIT)} 次），且待明日。"
     if s == "in_seclusion":
         return "道友仍在闭关，不可入秘境。"
     if s == "no_stamina":
@@ -83,6 +118,12 @@ async def cb_dungeon_run(callback: CallbackQuery):
     action = await consume_action_callback(callback)
     if not action or not action.startswith("dg:"):
         return
-    res = await dungeon.run(callback.from_user.id, action[3:])
-    await show(callback, _result_text(res), main_menu())
+    if action == "dg:collect":
+        res = await dungeon.collect(callback.from_user.id)
+    else:
+        res = await dungeon.start(callback.from_user.id, action[3:])
+    markup = await _active_markup(callback.from_user.id) if res["status"] in {
+        "started", "pending", "ready",
+    } else main_menu()
+    await show(callback, _result_text(res), markup)
     await callback.answer()

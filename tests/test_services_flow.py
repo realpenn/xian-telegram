@@ -42,7 +42,7 @@ async def test_explore_blocked_during_seclusion(temp_db):
     await cultivation.start(uid)
     before = await character.get(uid)
 
-    res = await explore_service.explore(uid, "后山")
+    res = await explore_service.start(uid, "后山")
     after = await character.get(uid)
 
     assert res["status"] == "in_seclusion"
@@ -60,12 +60,12 @@ async def test_concurrent_explore_spends_stamina_once(temp_db):
         (10, now, uid))
 
     results = await asyncio.gather(
-        explore_service.explore(uid, "后山"),
-        explore_service.explore(uid, "后山"))
+        explore_service.start(uid, "后山"),
+        explore_service.start(uid, "后山"))
     statuses = sorted(r["status"] for r in results)
     after = await character.get(uid)
 
-    assert statuses == ["no_stamina", "ok"]
+    assert statuses == ["pending", "started"]
     assert after.stamina == 0
 
 

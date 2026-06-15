@@ -8,6 +8,11 @@ def test_advance_cost_monotonic_within_realm():
     assert all(c > 0 for c in costs)
 
 
+def test_advance_cost_matches_issue8_progression():
+    assert R.advance_cost(0, 0) == 200
+    assert R.advance_cost(0, 1) == 240
+
+
 def test_big_success_rate_clamped():
     assert 0.05 <= big_success_rate(0, 0) <= 0.95
     assert big_success_rate(2, 0) >= 0.05

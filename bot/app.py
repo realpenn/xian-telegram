@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import os
 
-from aiogram import Bot, Dispatcher
+from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -13,7 +13,16 @@ from handlers import (bag, boss, craft, cultivate, daily, dungeon, explore,
                       help as help_h, me, pvp, rank, sect, shop, skills, start)
 from handlers.common import cleanup_callback_tokens
 from models import db
-from services import world_boss
+from services import character, notifications, world_boss
+
+
+class ActivityMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = data.get("event_from_user")
+        if user and not getattr(user, "is_bot", False):
+            username = user.username or user.full_name or str(user.id)
+            await character.touch_activity(user.id, username)
+        return await handler(event, data)
 
 _COMMANDS = [
     BotCommand(command="start", description="踏入仙途 / 测灵根"),
@@ -50,8 +59,10 @@ async def main():
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     scheduler.add_job(world_boss.scheduled_spawn, "cron", hour=20, minute=0, args=[bot])
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
+    scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])
     scheduler.start()
     dp = Dispatcher()
+    dp.update.middleware(ActivityMiddleware())
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,
                    pvp, rank, boss, sect, daily, help_h):
         dp.include_router(module.router)

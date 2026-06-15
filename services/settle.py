@@ -1,10 +1,12 @@
 """惰性结算：精力恢复、闭关修为。纯函数，便于单测（spec §4）。"""
 from __future__ import annotations
 
-from config.realms import SECLUSION_RATE
+from config import realms as R
 
-STAMINA_REGEN_SECONDS = 240   # 1 点 / 4 分钟
+STAMINA_REGEN_SECONDS = 216   # 1 点 / 3.6 分钟，约 400 点 / 日
 OFFLINE_CAP_HOURS = 12        # 闭关离线上限
+SECLUSION_STAGE_SECONDS = 24 * 3600
+CULTIVATION_SCALE = 1_000_000
 
 
 def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):
@@ -22,12 +24,31 @@ def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):
     return new_val, new_at
 
 
-def seclusion_gain(realm: int, start_at: int, now: int,
-                   root_bone: int, place_factor: float = 1.0,
+def seclusion_gain(realm: int, stage: int, start_at: int, now: int,
+                   root_bone: int = 0,
+                   place_factor: float = 1.0,
                    offline_cap_hours: int = OFFLINE_CAP_HOURS) -> int:
-    """闭关所得修为 = 速率 × min(经过, 离线上限)。速率含根骨与地点系数。"""
-    rate = SECLUSION_RATE[realm] * (1 + root_bone / 200) * place_factor
+    gain, _ = seclusion_gain_with_remainder(
+        realm, stage, start_at, now, root_bone, place_factor, offline_cap_hours, 0)
+    return gain
+
+
+def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: int,
+                                  root_bone: int = 0,
+                                  place_factor: float = 1.0,
+                                  offline_cap_hours: int = OFFLINE_CAP_HOURS,
+                                  remainder_units: int = 0) -> tuple[int, int]:
+    """当前小阶 24 小时约得一级；根骨/外部加成再提速。"""
     elapsed = min(now - start_at, offline_cap_hours * 3600)
     if elapsed < 0:
         elapsed = 0
-    return int(rate * elapsed / 3600)
+    raw_units = int(
+        R.advance_cost(realm, stage)
+        * elapsed
+        * (1 + max(0, root_bone) / 200)
+        * max(0.0, place_factor)
+        * CULTIVATION_SCALE
+        / SECLUSION_STAGE_SECONDS
+    )
+    total_units = raw_units + max(0, int(remainder_units or 0))
+    return total_units // CULTIVATION_SCALE, total_units % CULTIVATION_SCALE

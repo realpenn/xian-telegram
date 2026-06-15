@@ -1,13 +1,22 @@
 """NPC 商店与回收（spec §9）。"""
 from __future__ import annotations
 
+import time
+
 from config.items import item_name, sell_price
-from config.shop import SHOP_ITEMS
+from config.shop import (SHOP_ITEMS, STAMINA_BUY_DAILY_LIMIT, STAMINA_BUY_GAIN,
+                         stamina_buy_cost)
 from config import realms as R
 from models import db
 
-STAMINA_STONE_COST = 80
-STAMINA_STONE_GAIN = 20
+
+def _day(ts: int) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
+
+
+def first_buy_cost_per_stamina(realm: int) -> float:
+    """当日首买的单位精力灵石成本（用于经济模拟/校准）。"""
+    return stamina_buy_cost(realm, 1) / STAMINA_BUY_GAIN
 
 
 async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
@@ -57,6 +66,8 @@ async def sell(user_id: int, item_key: str, qty: int = 1) -> dict:
 
 
 async def buy_stamina(user_id: int, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
+    day = _day(now)
     async with db.transaction() as conn:
         row = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await row.fetchone()
@@ -69,13 +80,21 @@ async def buy_stamina(user_id: int, now: int = None) -> dict:
         cap = R.STAMINA_CAP[char["realm"]] + welfare["stamina_bonus"]
         if stamina >= cap:
             return {"status": "stamina_full", "cap": cap}
-        if char["spirit_stone"] < STAMINA_STONE_COST:
-            return {"status": "no_stone", "need": STAMINA_STONE_COST,
-                    "have": char["spirit_stone"]}
-        gained = min(STAMINA_STONE_GAIN, cap - stamina)
+        # 当日购买次数（跨天重置）。
+        bought = char["stamina_buy_count"] if char["stamina_buy_day"] == day else 0
+        if bought >= STAMINA_BUY_DAILY_LIMIT:
+            return {"status": "buy_limit", "limit": STAMINA_BUY_DAILY_LIMIT}
+        nth = bought + 1
+        cost = stamina_buy_cost(char["realm"], nth)
+        if char["spirit_stone"] < cost:
+            return {"status": "no_stone", "need": cost, "have": char["spirit_stone"]}
+        gained = min(STAMINA_BUY_GAIN, cap - stamina)
         await conn.execute(
-            "UPDATE characters SET spirit_stone=spirit_stone-?, stamina=?, stamina_at=? "
-            "WHERE user_id=?",
-            (STAMINA_STONE_COST, stamina + gained, stamina_at, user_id))
-        return {"status": "stamina_ok", "cost": STAMINA_STONE_COST,
-                "gain": gained, "stamina": stamina + gained, "cap": cap}
+            "UPDATE characters SET spirit_stone=spirit_stone-?, stamina=?, stamina_at=?, "
+            "stamina_buy_count=?, stamina_buy_day=? WHERE user_id=?",
+            (cost, stamina + gained, stamina_at, nth, day, user_id))
+        return {"status": "stamina_ok", "cost": cost, "gain": gained,
+                "stamina": stamina + gained, "cap": cap, "nth": nth,
+                "limit": STAMINA_BUY_DAILY_LIMIT,
+                "next_cost": stamina_buy_cost(char["realm"], nth + 1)
+                if nth < STAMINA_BUY_DAILY_LIMIT else None}

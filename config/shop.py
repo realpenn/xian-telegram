@@ -21,3 +21,16 @@ SHOP_ITEMS = {
 
 def goods_for_realm(realm: int):
     return [(key, val) for key, val in SHOP_ITEMS.items() if realm >= val["realm"]]
+
+
+# 灵石买精力（#16）：按境界基价 + 当日第 n 次翻倍递增 + 每日封顶，
+# 让首买单价就高于当前最佳内容的灵石/精力产出，堵死 灵石→精力→刷钱 套利。
+STAMINA_BUY_BASE = {0: 120, 1: 260, 2: 600, 3: 1200}
+STAMINA_BUY_DAILY_LIMIT = 3
+STAMINA_BUY_GAIN = 20
+
+
+def stamina_buy_cost(realm: int, nth: int) -> int:
+    """当日第 nth 次（1-indexed）买精力的灵石价：基价 × 2^(n-1)。"""
+    base = STAMINA_BUY_BASE.get(realm, STAMINA_BUY_BASE[max(STAMINA_BUY_BASE)])
+    return base * (2 ** max(0, nth - 1))

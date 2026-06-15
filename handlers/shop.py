@@ -48,9 +48,17 @@ def _result_text(res: dict) -> str:
     if s == "ok":
         return f"回收 {res['item']}×{res['qty']}，得灵石 {res['gain']}。"
     if s == "stamina_ok":
-        return f"耗灵石 {res['cost']}，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。"
+        text = f"耗灵石 {res['cost']}，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。"
+        if res.get("limit"):
+            text += f"今日第 {res.get('nth')}/{res['limit']} 次"
+            if res.get("next_cost"):
+                text += f"，下次需 {res['next_cost']} 灵石"
+            text += "。"
+        return text
     if s == "stamina_full":
         return "精力已满，暂不必购买。"
+    if s == "buy_limit":
+        return f"今日买精力已达上限（{res['limit']} 次），灵石买精力非长久之计，明日再来。"
     if s == "no_stone":
         return f"灵石不足（需 {res['need']}，余 {res['have']}）。"
     if s == "no_item":

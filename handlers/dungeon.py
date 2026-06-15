@@ -58,8 +58,10 @@ def _minutes(seconds: int) -> str:
 def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "started":
+        fee = res.get("entry_fee", 0)
+        fee_txt = f"（入场费 {fee} 灵石）" if fee else ""
         return (
-            f"🏯 已进入 {res['dungeon']}，预计 {_minutes(res['seconds'])} 后完成。\n"
+            f"🏯 已进入 {res['dungeon']}{fee_txt}，预计 {_minutes(res['seconds'])} 后完成。\n"
             f"⚡ 精力余 {res['stamina_left']}"
         )
     if s == "pending":
@@ -78,6 +80,8 @@ def _result_text(res: dict) -> str:
         return "道友正在外历练，须归来后方可入秘境。"
     if s == "no_stamina":
         return f"精力不济（需 {res['need']}，余 {res['have']}）。"
+    if s == "no_entry_fee":
+        return f"入场费不足（需灵石 {res['need']}，余 {res['have']}）。"
     if s == "missing":
         return NEED_START
     if s == "bad_dungeon":

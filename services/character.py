@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from config import realms as R
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
+from config.equipment import ENHANCE_PER_LEVEL
 from config.sects import welfare as sect_welfare_config
 from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTER_SKILL,
                            is_mind_skill, skill_bonus)
@@ -235,7 +236,7 @@ async def stats(char: Character) -> dict:
         has_weapon = False
         for inst in equipped:
             has_weapon = has_weapon or equipment_slot(inst["base_key"]) == "weapon"
-            _apply_equipment_bonus(base, equipment_bonus(inst))
+            _apply_equipment_bonus(base, equipment_bonus(inst), inst.get("enhance_level", 0))
         if not has_weapon:
             for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
@@ -262,7 +263,9 @@ async def stats(char: Character) -> dict:
     return base
 
 
-def _apply_equipment_bonus(base: dict, bonus: dict):
+def _apply_equipment_bonus(base: dict, bonus: dict, enhance_level: int = 0):
+    # 强化只放大装备的「平加属性」（hp/atk/df/...），不放大百分比词条与战斗修正。
+    mult = 1.0 + max(0, enhance_level) * ENHANCE_PER_LEVEL
     deferred = []
     for key, val in bonus.items():
         if key in COMBAT_MOD_KEYS:
@@ -271,7 +274,7 @@ def _apply_equipment_bonus(base: dict, bonus: dict):
             stat_key = key[:-4]
             deferred.append((stat_key, float(val)))
         else:
-            base[key] = base.get(key, 0) + val
+            base[key] = base.get(key, 0) + int(round(val * mult))
     for stat_key, pct in deferred:
         base[stat_key] = int(base.get(stat_key, 0) * (1 + pct))
 
@@ -352,6 +355,7 @@ def _instance_from_row(row) -> dict:
         "id": row["id"], "user_id": row["user_id"], "base_key": row["base_key"],
         "tier": row["tier"], "equipped_slot": row["equipped_slot"],
         "affixes": json.loads(row["affixes_json"] or "{}"),
+        "enhance_level": row["enhance_level"] if "enhance_level" in row.keys() else 0,
     }
 
 

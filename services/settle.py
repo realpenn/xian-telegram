@@ -5,6 +5,8 @@ from config import realms as R
 
 STAMINA_REGEN_SECONDS = 216   # 1 点 / 3.6 分钟，约 400 点 / 日
 OFFLINE_CAP_HOURS = 12        # 闭关离线上限
+# 每小阶目标时长改为按境界配置（见 config.realms.seclusion_stage_seconds，#15）。
+# 保留此常量作为基线（筑基档 24h），仅供外部参考。
 SECLUSION_STAGE_SECONDS = 24 * 3600
 CULTIVATION_SCALE = 1_000_000
 
@@ -48,7 +50,7 @@ def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: in
         * (1 + max(0, root_bone) / 200)
         * max(0.0, place_factor)
         * CULTIVATION_SCALE
-        / SECLUSION_STAGE_SECONDS
+        / R.seclusion_stage_seconds(realm)
     )
     total_units = raw_units + max(0, int(remainder_units or 0))
     return total_units // CULTIVATION_SCALE, total_units % CULTIVATION_SCALE

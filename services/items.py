@@ -11,7 +11,12 @@ from models import db
 from services import character
 
 STAMINA_PILL_GAIN = 40
+STAMINA_PILL_DAILY_LIMIT = 2   # 补灵丹每日使用上限，防止绕过精力上限刷钱（#16）
 ROOT_BONE_CAP = 100
+
+
+def _day(ts: int) -> str:
+    return time.strftime("%Y-%m-%d", time.localtime(ts))
 
 
 async def use(user_id: int, item_key: str, now: int = None) -> dict:
@@ -106,6 +111,10 @@ async def _use_buff_pill(conn, user_id: int, row, item_key: str, item: dict, now
 
 
 async def _use_stamina_pill(conn, user_id: int, row, now: int) -> dict:
+    day = _day(now)
+    used = row["pill_stamina_count"] if row["pill_stamina_day"] == day else 0
+    if used >= STAMINA_PILL_DAILY_LIMIT:
+        return {"status": "pill_limit", "limit": STAMINA_PILL_DAILY_LIMIT}
     welfare = await character._sect_welfare(conn, user_id)
     stamina, stamina_at = character._settled_stamina(row, now, welfare)
     cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
@@ -114,7 +123,8 @@ async def _use_stamina_pill(conn, user_id: int, row, now: int) -> dict:
         return {"status": "stamina_full", "cap": cap}
     await _consume(conn, user_id, "补灵丹")
     await conn.execute(
-        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-        (stamina + gained, stamina_at, user_id))
+        "UPDATE characters SET stamina=?, stamina_at=?, pill_stamina_count=?, pill_stamina_day=? "
+        "WHERE user_id=?",
+        (stamina + gained, stamina_at, used + 1, day, user_id))
     return {"status": "stamina_ok", "gain": gained, "stamina": stamina + gained,
-            "cap": cap}
+            "cap": cap, "nth": used + 1, "limit": STAMINA_PILL_DAILY_LIMIT}

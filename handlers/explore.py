@@ -8,7 +8,7 @@ from aiogram.types import (CallbackQuery, InlineKeyboardButton,
 
 from config import realms as R
 from config.items import item_name
-from config.maps import maps_for_realm
+from config.maps import lower_maps, maps_at_realm
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              action_callback_data, consume_action_callback, main_menu, show)
 from services import character
@@ -17,7 +17,13 @@ from services import explore as explore_service
 router = Router()
 
 
-async def render_menu(user_id: int):
+async def _map_button(user_id: int, key: str, m: dict) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=f"{m['name']}·{m['difficulty']}（精力{m['stamina']}）",
+        callback_data=await action_callback_data(user_id, f"ex:{key}"))
+
+
+async def render_menu(user_id: int, show_lower: bool = False):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
@@ -35,12 +41,20 @@ async def render_menu(user_id: int):
     welfare = await character.sect_welfare(user_id)
     cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
     rows = []
-    for key, m in maps_for_realm(char.realm):
-        rows.append([InlineKeyboardButton(
-            text=f"{m['name']}（精力{m['stamina']}，约10分钟）",
-            callback_data=await action_callback_data(user_id, f"ex:{key}"))])
+    if show_lower:
+        for key, m in lower_maps(char.realm):
+            rows.append([await _map_button(user_id, key, m)])
+        rows.append([InlineKeyboardButton(text="⬅️ 返回当前境界", callback_data="nav:explore")])
+        header = "📜 低阶历练（刷低阶材料 / 补突破资源）："
+    else:
+        for key, m in maps_at_realm(char.realm):
+            rows.append([await _map_button(user_id, key, m)])
+        if lower_maps(char.realm):
+            rows.append([InlineKeyboardButton(
+                text="📜 低阶历练", callback_data="nav:explore:lower")])
+        header = "本境界三处历练之地（易 / 中 / 难），择一斩妖夺宝："
     rows += main_menu().inline_keyboard
-    text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n择一处历练之地，斩妖夺宝："
+    text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n{header}"
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -122,6 +136,15 @@ async def cb_explore_menu(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
     text, markup = await render_menu(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "nav:explore:lower")
+async def cb_explore_lower(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    text, markup = await render_menu(callback.from_user.id, show_lower=True)
     await show(callback, text, markup)
     await callback.answer()
 

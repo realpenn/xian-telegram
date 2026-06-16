@@ -192,18 +192,44 @@ class _FakeRng:
 
 
 @pytest.mark.asyncio
-async def test_explore_can_run_three_encounters(temp_db):
+async def test_hard_map_runs_planned_multi_encounters(temp_db):
+    # 难图为多遭遇；遭遇计划开局即定并落库，结算时实际战斗数与之一致（#20）。
     uid = 4004
     await character.create(uid, "tester")
     await character.set_progress(uid, 1, 0, 0)
 
-    started = await explore.start(uid, "后山", now=1000, rng=_FakeRng())
+    started = await explore.start(uid, "阴风古洞", now=1000, rng=_FakeRng())
     res = await explore.collect(uid, now=started["finish_at"], rng=_FakeRng())
 
     assert started["status"] == "started"
+    assert started["encounters"] >= 2
     assert res["status"] == "ok"
-    assert any("第 3 战" in line for line in res["log"])
-    assert res["reward"]["cult"] == 11
+    fights = [line for line in res["log"] if line.startswith("第 ")]
+    assert len(fights) == started["encounters"]
+    assert res["reward"]["cult"] > 0
+
+
+@pytest.mark.asyncio
+async def test_explore_menu_shows_current_realm_tier_with_fold(temp_db):
+    # #20：默认只展示当前境界三档（带难度标识），低阶图收进折叠入口。
+    from handlers import explore as explore_handler
+    uid = 4041
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 2, 0, 0)  # 金丹
+
+    _, markup = await explore_handler.render_menu(uid)
+    labels = [b.text for row in markup.inline_keyboard for b in row]
+    assert any("万妖岭·易" in l for l in labels)
+    assert any("碧毒蛟潭·中" in l for l in labels)
+    assert any("九霄雷泽·难" in l for l in labels)
+    assert not any("青牛后山" in l for l in labels)         # 低阶图不默认展开
+    assert any(b.callback_data == "nav:explore:lower"
+               for row in markup.inline_keyboard for b in row)
+
+    _, lower = await explore_handler.render_menu(uid, show_lower=True)
+    lower_labels = [b.text for row in lower.inline_keyboard for b in row]
+    assert any("青牛后山" in l for l in lower_labels)        # 折叠入口展示低阶图
+    assert any("妖兽森林" in l for l in lower_labels)
 
 
 @pytest.mark.asyncio

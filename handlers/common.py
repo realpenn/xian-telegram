@@ -107,6 +107,46 @@ async def menu_with_breakthrough(user_id: int, can_advance: bool) -> InlineKeybo
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+LOW_HP_PCT = 0.30
+LOW_MP_PCT = 0.25
+
+
+def vitals_line(v: dict) -> str:
+    """血蓝展示行；气血/法力偏低各追加软提示（#24，不硬拦出战）。"""
+    line = f"❤️ 气血 {v['hp']}/{v['max_hp']}　🔵 法力 {v['mp']}/{v['max_mp']}"
+    if v["max_hp"] > 0 and v["hp"] < v["max_hp"] * LOW_HP_PCT:
+        line += "\n⚠️ 气血不足三成，凶险难料，宜先休整或服丹。"
+    if v["max_mp"] > 0 and v["mp"] < v["max_mp"] * LOW_MP_PCT:
+        line += "\n⚠️ 法力不足，战技恐难施展，宜回蓝后再战。"
+    return line
+
+
+def mp_starved_note(res: dict) -> str:
+    """结算时若本场战斗法力偏低，补一句战技断档反馈（#24 P2）。无则空串。"""
+    mx = res.get("max_mp", 0)
+    low = min(res.get("battle_mp_before", mx), res.get("battle_mp_after", mx))
+    if mx > 0 and low < mx * LOW_MP_PCT:
+        return "📉 法力不济，战技多次断档转普攻，输出折损。"
+    return ""
+
+
+def battle_vitals_lines(res: dict) -> list:
+    """结算血蓝展示（#24 P2）：先报本场战斗 出发→战斗末（解释胜负），
+    若领取时当前状态与战斗末不同（嗑丹/回复/重伤地板）再补一行当前状态。"""
+    lines = [
+        f"⚔️ 气血 {res['battle_hp_before']}→{res['battle_hp_after']}/{res['max_hp']}"
+        f"　🔵 法力 {res['battle_mp_before']}→{res['battle_mp_after']}/{res['max_mp']}"
+    ]
+    if res["hp_after"] != res["battle_hp_after"] or res["mp_after"] != res["battle_mp_after"]:
+        lines.append(
+            f"❤️ 当前 气血 {res['hp_after']}/{res['max_hp']}"
+            f"　🔵 法力 {res['mp_after']}/{res['max_mp']}")
+    note = mp_starved_note(res)
+    if note:
+        lines.append(note)
+    return lines
+
+
 def progress_bar(cur: int, total: int, width: int = 10) -> str:
     if total <= 0:
         return "▰" * width

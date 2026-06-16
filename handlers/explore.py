@@ -10,7 +10,8 @@ from config import realms as R
 from config.items import item_name
 from config.maps import lower_maps, maps_at_realm
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
-                             action_callback_data, consume_action_callback, main_menu, show)
+                             action_callback_data, battle_vitals_lines, consume_action_callback,
+                             main_menu, show, vitals_line)
 from services import character
 from services import explore as explore_service
 
@@ -54,7 +55,8 @@ async def render_menu(user_id: int, show_lower: bool = False):
                 text="📜 低阶历练", callback_data="nav:explore:lower")])
         header = "本境界三处历练之地（易 / 中 / 难），择一斩妖夺宝："
     rows += main_menu().inline_keyboard
-    text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n{header}"
+    v = await character.vitals(char)
+    text = f"⚔️ 历练\n⚡ 精力 {char.stamina}/{cap}\n{vitals_line(v)}\n{header}"
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -118,7 +120,8 @@ def _result_text(res: dict) -> str:
             parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
         lines.append("🎁 战利品：" + "，".join(parts))
     else:
-        lines.append("道友力有不逮，铩羽而归（无损失，养精蓄锐再来）。")
+        lines.append("道友力竭，重伤而归（修为、装备无损，养息后再来）。")
+    lines += battle_vitals_lines(res)
     lines.append(f"⚡ 精力余 {res['stamina_left']}")
     return "\n".join(lines)
 

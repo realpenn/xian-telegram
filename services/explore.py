@@ -7,7 +7,7 @@ import time
 from config.maps import MAPS
 from config.realms import realm_label
 from models import db
-from services import character
+from services import character, settle
 from services.combat import Combatant, simulate
 
 # 历练时长与遭遇密度按难度绑定（#20）：开局即定遭遇计划与时长，结算复用。
@@ -127,10 +127,17 @@ async def start(user_id: int, map_key: str, now: int = None, rng=None) -> dict:
         await conn.execute(
             "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
             (stamina - cost, stamina_at, user_id))
+        # 快照出发血蓝（结算到出发时刻），战斗按此开打，不被晚领/中途嗑丹绕过（#24 P1）。
+        char_obj = character._from_row(row)
+        sst = await character.stats(char_obj)
+        start_hp, _, start_mp, _ = character.settled_vitals(char_obj, sst["hp"], sst["mp"], now)
+        # 冻结当前血蓝：锚点设 finish_at，活动期间不自然回复（回来才休整）；结算时按"当前-战斗损耗"合并。
+        await character.write_vitals(user_id, start_hp, start_mp, finish_at, conn=conn)
         await conn.execute(
             "INSERT INTO explore_runs(user_id, map_key, start_at, finish_at, seed, status, "
-            "encounters, is_boss) VALUES(?,?,?,?,?,'active',?,?)",
-            (user_id, map_key, now, finish_at, seed, n_enc, 1 if is_boss else 0))
+            "encounters, is_boss, start_hp, start_mp) VALUES(?,?,?,?,?,'active',?,?,?,?)",
+            (user_id, map_key, now, finish_at, seed, n_enc, 1 if is_boss else 0,
+             start_hp, start_mp))
         return {
             "status": "started",
             "map_key": map_key,
@@ -161,7 +168,8 @@ async def collect(user_id: int, now: int = None, rng=None) -> dict:
         result = await _resolve(
             user_id, row["map_key"], row["seed"], now, rng, conn=conn,
             n_enc=row["encounters"],
-            is_boss=None if stored_boss is None else bool(stored_boss))
+            is_boss=None if stored_boss is None else bool(stored_boss),
+            start_hp=row["start_hp"], start_mp=row["start_mp"], finish_at=row["finish_at"])
         await conn.execute("DELETE FROM explore_runs WHERE user_id=?", (user_id,))
         return result
 
@@ -171,7 +179,8 @@ async def explore(user_id: int, map_key: str, rng=None, now: int = None) -> dict
 
 
 async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, conn=None,
-                   n_enc: int = None, is_boss: bool = None) -> dict:
+                   n_enc: int = None, is_boss: bool = None,
+                   start_hp: int = None, start_mp: int = None, finish_at: int = None) -> dict:
     m = MAPS.get(map_key)
     if not m:
         return {"status": "bad_map"}
@@ -187,9 +196,16 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
     mods = await character.combat_mods(user_id)
-    player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
-                       **mods)
+    max_hp, max_mp = st["hp"], st["mp"]
+    # 战前用「出发时」快照血蓝开打（#24 P1）：晚领/中途嗑丹都不影响本场；旧在途 run 无快照→满血。
+    if start_hp is None:
+        cur_hp, cur_mp = max_hp, max_mp
+    else:
+        cur_hp = max(0, min(start_hp, max_hp))
+        cur_mp = max(0, min(start_mp, max_mp))
+    player = Combatant(name="道友", hp=cur_hp, mp=cur_mp, max_hp=max_hp, max_mp=max_mp,
+                       atk=st["atk"], df=st["df"], spd=st["spd"], crit=st["crit"],
+                       skills=skills or ["普攻"], **mods)
     if is_boss is None:
         # 兼容无存储计划的旧 run：即时 roll 一份计划。
         is_boss = rng.random() < m["boss_rate"]
@@ -221,7 +237,21 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
             await character.grant_reward(user_id, stone, cult, drops)
         reward = {"stone": stone, "cult": cult, "drops": drops}
 
+    # 严格事件顺序（#24 P1）：先得「战斗结束状态」(finish_at，落 20% 重伤地板)，
+    # 再从该状态自然回复到领取时刻 now。领取前已禁服恢复丹，故无需合并。
+    anchor = finish_at if finish_at is not None else now
+    combat_hp = character.floor_hp(max_hp, player.hp)
+    combat_mp = max(0, min(player.mp, max_mp))
+    final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
+    final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
+    await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+
     return {"status": "ok", "map_key": map_key, "map": m["name"],
             "win": win, "is_boss": is_boss,
             "mob": "、".join(src["name"] for src in mob_sources),
-            "log": logs, "reward": reward, "stamina_left": char.stamina}
+            "log": logs, "reward": reward, "stamina_left": char.stamina,
+            # 战斗快照（出发→战斗末，解释胜负）与领取后当前状态（落库）分开展示（#24 P2）。
+            "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
+            "battle_mp_before": cur_mp, "battle_mp_after": max(0, player.mp),
+            "hp_after": final_hp, "mp_after": final_mp,
+            "max_hp": max_hp, "max_mp": max_mp}

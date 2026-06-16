@@ -7,7 +7,7 @@ import time
 from config import realms as R
 from config.dungeons import DUNGEONS
 from config.items import ITEMS, item_name
-from services import character
+from services import character, settle
 from services.combat import Combatant, simulate
 from models import db
 
@@ -122,10 +122,16 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
             (user_id, dungeon_key, _day(now)))
         finish_at = now + DUNGEON_DURATION_SECONDS
         seed = rng.randint(1, 10_000_000)
+        # 快照出发血蓝，战斗按此开打，不被晚领/中途嗑丹绕过（#24 P1）。
+        char_obj = character._from_row(row)
+        sst = await character.stats(char_obj)
+        start_hp, _, start_mp, _ = character.settled_vitals(char_obj, sst["hp"], sst["mp"], now)
+        # 冻结当前血蓝：锚点设 finish_at，活动期间不自然回复；结算时按"当前-战斗损耗"合并。
+        await character.write_vitals(user_id, start_hp, start_mp, finish_at, conn=conn)
         await conn.execute(
-            "INSERT INTO dungeon_jobs(user_id, dungeon_key, start_at, finish_at, seed, status) "
-            "VALUES(?,?,?,?,?,'active')",
-            (user_id, dungeon_key, now, finish_at, seed))
+            "INSERT INTO dungeon_jobs(user_id, dungeon_key, start_at, finish_at, seed, status, "
+            "start_hp, start_mp) VALUES(?,?,?,?,?,'active',?,?)",
+            (user_id, dungeon_key, now, finish_at, seed, start_hp, start_mp))
         return {
             "status": "started",
             "dungeon_key": dungeon_key,
@@ -150,7 +156,9 @@ async def collect(user_id: int, now: int = None, rng=None) -> dict:
         if row["finish_at"] > now:
             return _run_status(row, now)
         # 在同一事务内结算并删除，避免"已删但奖励未发"的崩溃窗口。
-        result = await _resolve(user_id, row["dungeon_key"], row["seed"], now, rng, conn=conn)
+        result = await _resolve(user_id, row["dungeon_key"], row["seed"], now, rng, conn=conn,
+                                start_hp=row["start_hp"], start_mp=row["start_mp"],
+                                finish_at=row["finish_at"])
         await conn.execute("DELETE FROM dungeon_jobs WHERE user_id=?", (user_id,))
         return result
 
@@ -159,7 +167,8 @@ async def run(user_id: int, dungeon_key: str, now: int = None) -> dict:
     return await start(user_id, dungeon_key, now)
 
 
-async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None, conn=None) -> dict:
+async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None, conn=None,
+                   start_hp: int = None, start_mp: int = None, finish_at: int = None) -> dict:
     d = DUNGEONS.get(dungeon_key)
     if not d:
         return {"status": "bad_dungeon"}
@@ -175,9 +184,16 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     st = await character.stats(char)
     skills = await character.get_skills(user_id)
     mods = await character.combat_mods(user_id)
-    player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
-                       df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
-                       **mods)
+    max_hp, max_mp = st["hp"], st["mp"]
+    # 战前用「出发时」快照血蓝开打（#24 P1）：晚领/中途嗑丹不影响本场；旧在途 run 无快照→满血。
+    if start_hp is None:
+        cur_hp, cur_mp = max_hp, max_mp
+    else:
+        cur_hp = max(0, min(start_hp, max_hp))
+        cur_mp = max(0, min(start_mp, max_mp))
+    player = Combatant(name="道友", hp=cur_hp, mp=cur_mp, max_hp=max_hp, max_mp=max_mp,
+                       atk=st["atk"], df=st["df"], spd=st["spd"], crit=st["crit"],
+                       skills=skills or ["普攻"], **mods)
     logs = []
     cleared = 0
     for layer in range(1, d["layers"] + 1):
@@ -214,9 +230,23 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     else:
         stone = cult = 0
 
+    # 严格事件顺序（#24 P1）：先得战斗结束状态(finish_at，落 20% 重伤地板)，再自然回复到 now。
+    # 领取前已禁服恢复丹，故无需合并。
+    anchor = finish_at if finish_at is not None else now
+    combat_hp = character.floor_hp(max_hp, player.hp)
+    combat_mp = max(0, min(player.mp, max_mp))
+    final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
+    final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
+    await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+
     return {"status": "ok", "dungeon_key": dungeon_key, "dungeon": d["name"],
             "cleared": cleared, "layers": d["layers"],
             "win": cleared == d["layers"], "log": logs,
             "reward": {"stone": stone, "cult": cult, "drops": stack_drops,
                        "equipment": equipment_drops},
-            "stamina_left": char.stamina}
+            "stamina_left": char.stamina,
+            # 战斗快照（出发→战斗末，解释胜负）与领取后当前状态（落库）分开展示（#24 P2）。
+            "battle_hp_before": cur_hp, "battle_hp_after": max(0, player.hp),
+            "battle_mp_before": cur_mp, "battle_mp_after": max(0, player.mp),
+            "hp_after": final_hp, "mp_after": final_mp,
+            "max_hp": max_hp, "max_mp": max_mp}

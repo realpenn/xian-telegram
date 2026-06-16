@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.dungeons import DUNGEONS
 from config.items import item_name
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, battle_vitals_lines,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, main_menu, show, vitals_line)
 from services import character, dungeon
 
 router = Router()
@@ -30,7 +31,9 @@ async def render_dungeon(user_id: int):
             text = f"🏯 正在探索 {active['dungeon']}，约 {_minutes(active['remaining'])} 后完成。"
         return text, InlineKeyboardMarkup(inline_keyboard=rows)
     rows = []
-    lines = ["🏯 秘境", f"每日每处秘境最多可入 {dungeon.DUNGEON_DAILY_LIMIT} 次。"]
+    v = await character.vitals(char)
+    lines = ["🏯 秘境", vitals_line(v),
+             f"每日每处秘境最多可入 {dungeon.DUNGEON_DAILY_LIMIT} 次。"]
     for key, d in DUNGEONS.items():
         state = "可入" if char.realm >= d["realm"] else "未解锁"
         lines.append(f"{d['name']}：{d['layers']} 层，精力 {d['stamina']}，约30分钟（{state}）")
@@ -92,12 +95,14 @@ def _result_text(res: dict) -> str:
         parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
     if rw["equipment"]:
         parts.append("法宝：" + "、".join(rw["equipment"]))
-    return "\n".join([
-        f"🏯 {res['dungeon']}：深入 {res['cleared']}/{res['layers']} 层。",
-        *res["log"],
-        "🎁 收获：" + "，".join(parts),
-        f"⚡ 精力余 {res['stamina_left']}",
-    ])
+    body = [f"🏯 {res['dungeon']}：深入 {res['cleared']}/{res['layers']} 层。", *res["log"]]
+    if res["cleared"]:
+        body.append("🎁 收获：" + "，".join(parts))
+    else:
+        body.append("首层即力竭，重伤而归（修为、装备无损）。")
+    body += battle_vitals_lines(res)
+    body.append(f"⚡ 精力余 {res['stamina_left']}")
+    return "\n".join(body)
 
 
 @router.message(Command("dungeon"))

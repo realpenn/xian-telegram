@@ -5,6 +5,11 @@ from config import realms as R
 
 STAMINA_REGEN_SECONDS = 216   # 1 点 / 3.6 分钟，约 400 点 / 日
 OFFLINE_CAP_HOURS = 12        # 闭关离线上限
+# 气血/法力自然回复（#24）：按 max 的百分比/分，跨境界自动缩放。
+# 0→满 所需秒数：气血 2000s(3%/分)、法力 1000s(6%/分，快于气血)。
+HP_REGEN_SECONDS_PER_FULL = 2000
+MP_REGEN_SECONDS_PER_FULL = 1000
+HP_FLOOR_PCT = 0.20           # 活动结束写回的重伤地板：胜负都不破 20%·maxHP
 # 每小阶目标时长改为按境界配置（见 config.realms.seclusion_stage_seconds，#15）。
 # 保留此常量作为基线（筑基档 24h），仅供外部参考。
 SECLUSION_STAGE_SECONDS = 24 * 3600
@@ -21,6 +26,27 @@ def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):
     new_val = min(cap, stamina + gained)
     # 锚点只前移已消耗的整数刻度，避免丢失零头进度。
     new_at = stamina_at + gained * STAMINA_REGEN_SECONDS
+    if new_val >= cap:
+        new_at = now
+    return new_val, new_at
+
+
+def regen_resource(cur: int, cap: int, at: int, now: int, seconds_per_full: int):
+    """按时间惰性回复气血/法力（#24），返回 (新值, 新锚点)。
+
+    速率 = cap / seconds_per_full（点/秒），故跨境界随 max 缩放。仿 regen_stamina：
+    锚点只前移「已消耗整点」对应的时间，避免快读时零头被反复丢弃导致永不回复。
+    """
+    if cap <= 0:
+        return 0, now
+    if cur >= cap:
+        return cap, now
+    gained = int((now - at) * cap / seconds_per_full)
+    if gained <= 0:
+        return cur, at
+    new_val = min(cap, cur + gained)
+    consumed = int(gained * seconds_per_full / cap)
+    new_at = at + consumed
     if new_val >= cap:
         new_at = now
     return new_val, new_at

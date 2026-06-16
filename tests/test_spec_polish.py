@@ -367,24 +367,32 @@ async def test_consumables_restore_clear_debuff_and_raise_root(temp_db):
     uid = 4006
     await character.create(uid, "tester")
     before = await character.get(uid)
+    st = await character.stats(before)
+    # 残血蓝 + 道基不稳：补灵丹回法力、疗伤丹回血兼清道基不稳、天材地宝涨根骨（#24）。
     await db.execute(
-        "UPDATE characters SET stamina=0, stamina_at=?, debuff_json=? WHERE user_id=?",
-        (1000, '{"unstable_until":999999}', uid))
+        "UPDATE characters SET current_hp=1, current_mp=0, hp_at=1000, mp_at=1000, "
+        "debuff_json=? WHERE user_id=?",
+        ('{"unstable_until":999999}', uid))
     await character.add_item(uid, "补灵丹", 1)
     await character.add_item(uid, "疗伤丹", 1)
     await character.add_item(uid, "天材地宝", 1)
 
-    stamina_res = await items.use(uid, "补灵丹", now=1000)
+    mp_res = await items.use(uid, "补灵丹", now=1000)
     heal_res = await items.use(uid, "疗伤丹", now=1000)
     root_res = await items.use(uid, "天材地宝", now=1000)
     after = await character.get(uid)
 
-    assert stamina_res["status"] == "stamina_ok"
-    assert heal_res["status"] == "healed"
+    assert mp_res["status"] == "vital_restored"
+    assert mp_res["mp_gain"] == int(st["mp"] * 0.50) and mp_res["hp_gain"] == 0
+    assert heal_res["status"] == "vital_restored"
+    assert heal_res["cleared_unstable"] is True
+    assert heal_res["hp_gain"] == int(st["hp"] * 0.50)
     assert root_res["status"] == "root_up"
-    assert after.stamina > 0
     assert after.debuff_json == {}
     assert after.root_bone == before.root_bone + 1
+    v = await character.vitals(after, now=1000)
+    assert v["hp"] == min(st["hp"], 1 + int(st["hp"] * 0.50))
+    assert v["mp"] == int(st["mp"] * 0.50)
 
 
 @pytest.mark.asyncio

@@ -42,15 +42,19 @@ async def render_bag(user_id: int):
 
 def _result_text(res: dict) -> str:
     s = res["status"]
-    if s == "stamina_ok":
-        suffix = f"（今日 {res.get('nth')}/{res['limit']} 次）" if res.get("limit") else ""
-        return f"服下补灵丹，精力 +{res['gain']}（{res['stamina']}/{res['cap']}）。{suffix}"
-    if s == "stamina_full":
-        return "精力已满，暂不必服用补灵丹。"
-    if s == "pill_limit":
-        return f"今日补灵丹已服 {res['limit']} 次，灵气紊乱，需待明日。"
-    if s == "healed":
-        return "服下疗伤丹，道基渐稳。"
+    if s == "vital_restored":
+        parts = []
+        if res["hp_gain"] > 0:
+            parts.append(f"气血 +{res['hp_gain']}（{res['hp']}/{res['max_hp']}）")
+        if res["mp_gain"] > 0:
+            parts.append(f"法力 +{res['mp_gain']}（{res['mp']}/{res['max_mp']}）")
+        if res.get("cleared_unstable"):
+            parts.append("道基渐稳")
+        return f"服下{res['item']}，" + "，".join(parts) + "。"
+    if s == "vital_full":
+        return f"气血法力俱已充盈，暂不必服用{res['item']}。"
+    if s == "busy_activity":
+        return f"正在历练 / 秘境途中，不便服用{res['item']}，归来后再补给。"
     if s == "root_up":
         return f"炼化{res['item']}，根骨 {res['old']} → {res['new']}。"
     if s == "root_cap":

@@ -216,6 +216,12 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "stamina_buy_day", "TEXT")
     await _ensure_column(_conn, "characters", "pill_stamina_count", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "characters", "pill_stamina_day", "TEXT")
+    # 当前气血/法力（#24）：可空，NULL ⇒ 视为满（旧存档零回填；首次结算按当前 max 落地）。
+    # hp_at/mp_at 为各自回复的惰性结算锚点，NULL ⇒ 视为 now（不补算历史回复）。
+    await _ensure_column(_conn, "characters", "current_hp", "INTEGER")
+    await _ensure_column(_conn, "characters", "current_mp", "INTEGER")
+    await _ensure_column(_conn, "characters", "hp_at", "INTEGER")
+    await _ensure_column(_conn, "characters", "mp_at", "INTEGER")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "world_boss", "cultivator_count", "INTEGER NOT NULL DEFAULT 1")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
@@ -232,6 +238,12 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "explore_runs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "dungeon_jobs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")
+    # 出发时的血蓝快照（#24 P1）：战斗按出发状态结算，晚领/中途嗑丹不影响本场。
+    # 旧在途 run 无快照(NULL) → _resolve 视作满血出发（兼容）。
+    await _ensure_column(_conn, "explore_runs", "start_hp", "INTEGER")
+    await _ensure_column(_conn, "explore_runs", "start_mp", "INTEGER")
+    await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
+    await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _conn.commit()
     # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
     _read_conn = await aiosqlite.connect(db_path)

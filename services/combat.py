@@ -41,8 +41,10 @@ class Combatant:
     stunned: bool = False
 
     def __post_init__(self):
-        self.max_hp = self.hp
-        self.max_mp = self.mp
+        # 不传 max ⇒ 满血开打（满配模拟/小怪沿用）；显式传 max ⇒ 残血开打仍以满值为上限基准，
+        # 使回春术 heal_pct·max_hp 与 _decide 的血量比例判定不被残血污染（#24）。
+        self.max_hp = self.max_hp or self.hp
+        self.max_mp = self.max_mp or self.mp
 
 
 def _hit(att, dfn, coef, rng):

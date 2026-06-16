@@ -4,19 +4,19 @@ from __future__ import annotations
 import json
 import time
 
-from config import realms as R
 from config.items import ITEMS, item_name
 from config.recipes import RECIPES
 from models import db
 from services import character
 
-STAMINA_PILL_GAIN = 40
-STAMINA_PILL_DAILY_LIMIT = 2   # 补灵丹每日使用上限，防止绕过精力上限刷钱（#16）
 ROOT_BONE_CAP = 100
-
-
-def _day(ts: int) -> str:
-    return time.strftime("%Y-%m-%d", time.localtime(ts))
+# 回复类丹药（#24）：按 max 的百分比补当前血蓝；疗伤丹兼清「道基不稳」。
+# 补灵丹由「回精力」改为「回法力」，买精力仍走 shop.stamina_buy_cost。
+RESTORE_PILLS = {
+    "疗伤丹": {"hp": 0.50, "mp": 0.0, "clear_unstable": True},
+    "补灵丹": {"hp": 0.0, "mp": 0.50, "clear_unstable": False},
+    "大还丹": {"hp": 1.0, "mp": 1.0, "clear_unstable": False},
+}
 
 
 async def use(user_id: int, item_key: str, now: int = None) -> dict:
@@ -39,16 +39,8 @@ async def use(user_id: int, item_key: str, now: int = None) -> dict:
             return await _learn_recipe(conn, user_id, item_key, item)
         if item.get("use") == "buff":
             return await _use_buff_pill(conn, user_id, row, item_key, item, now)
-        if item_key == "补灵丹":
-            return await _use_stamina_pill(conn, user_id, row, now)
-        if item_key == "疗伤丹":
-            state = json.loads(row["debuff_json"] or "{}")
-            state.pop("unstable_until", None)
-            await _consume(conn, user_id, item_key)
-            await conn.execute(
-                "UPDATE characters SET debuff_json=? WHERE user_id=?",
-                (json.dumps(state, ensure_ascii=False), user_id))
-            return {"status": "healed", "item": item_name(item_key)}
+        if item_key in RESTORE_PILLS:
+            return await _use_restore_pill(conn, user_id, row, item_key, now)
         if item_key in ("天材地宝", "洗髓丹"):
             gain = 1 if item_key == "天材地宝" else 3
             new_root = min(ROOT_BONE_CAP, row["root_bone"] + gain)
@@ -110,21 +102,35 @@ async def _use_buff_pill(conn, user_id: int, row, item_key: str, item: dict, now
     }
 
 
-async def _use_stamina_pill(conn, user_id: int, row, now: int) -> dict:
-    day = _day(now)
-    used = row["pill_stamina_count"] if row["pill_stamina_day"] == day else 0
-    if used >= STAMINA_PILL_DAILY_LIMIT:
-        return {"status": "pill_limit", "limit": STAMINA_PILL_DAILY_LIMIT}
-    welfare = await character._sect_welfare(conn, user_id)
-    stamina, stamina_at = character._settled_stamina(row, now, welfare)
-    cap = R.STAMINA_CAP[row["realm"]] + welfare["stamina_bonus"]
-    gained = min(STAMINA_PILL_GAIN, cap - stamina)
-    if gained <= 0:
-        return {"status": "stamina_full", "cap": cap}
-    await _consume(conn, user_id, "补灵丹")
-    await conn.execute(
-        "UPDATE characters SET stamina=?, stamina_at=?, pill_stamina_count=?, pill_stamina_day=? "
-        "WHERE user_id=?",
-        (stamina + gained, stamina_at, used + 1, day, user_id))
-    return {"status": "stamina_ok", "gain": gained, "stamina": stamina + gained,
-            "cap": cap, "nth": used + 1, "limit": STAMINA_PILL_DAILY_LIMIT}
+async def _use_restore_pill(conn, user_id: int, row, item_key: str, now: int) -> dict:
+    """回血/回蓝/补满丹（#24）：按 max 百分比补当前血蓝。
+
+    P3：疗伤丹若要清「道基不稳」，先把它从状态里清掉再算 stats，使回血与写回
+    都基于「未被压制」的真实 max，避免满血角色被清成 180/200。
+    """
+    # 有未领取的历练/秘境时禁服恢复丹（#24 P1）：战斗结算→自然回复有严格事件顺序，
+    # 必须先领取把战斗结果落库，才能正确叠加丹药；否则会出现"事后扣伤害/丹药被覆盖"。
+    if await character._has_active_job(conn, user_id):
+        return {"status": "busy_activity", "item": item_name(item_key)}
+    spec = RESTORE_PILLS[item_key]
+    char = character._from_row(row)
+    will_clear = spec["clear_unstable"] and int(char.debuff_json.get("unstable_until", 0)) > now
+    if will_clear:
+        char.debuff_json.pop("unstable_until", None)
+    st = await character.stats(char)
+    max_hp, max_mp = st["hp"], st["mp"]
+    cur_hp, _, cur_mp, _ = character.settled_vitals(char, max_hp, max_mp, now)
+    new_hp = min(max_hp, cur_hp + int(max_hp * spec["hp"]))
+    new_mp = min(max_mp, cur_mp + int(max_mp * spec["mp"]))
+    hp_gain, mp_gain = new_hp - cur_hp, new_mp - cur_mp
+    if hp_gain <= 0 and mp_gain <= 0 and not will_clear:
+        return {"status": "vital_full", "item": item_name(item_key)}
+    await _consume(conn, user_id, item_key)
+    if will_clear:
+        await conn.execute(
+            "UPDATE characters SET debuff_json=? WHERE user_id=?",
+            (json.dumps(char.debuff_json, ensure_ascii=False), user_id))
+    await character.write_vitals(user_id, new_hp, new_mp, now, conn=conn)
+    return {"status": "vital_restored", "item": item_name(item_key),
+            "hp": new_hp, "max_hp": max_hp, "mp": new_mp, "max_mp": max_mp,
+            "hp_gain": hp_gain, "mp_gain": mp_gain, "cleared_unstable": will_clear}

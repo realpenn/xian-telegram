@@ -36,6 +36,10 @@ class Character:
     spirit_stone: int
     weapon_key: str
     debuff_json: dict
+    current_hp: int = None   # None ⇒ 视为满（旧档/新建未 materialize）
+    current_mp: int = None
+    hp_at: int = None        # 气血回复惰性结算锚点；None ⇒ 视为 now
+    mp_at: int = None
 
 
 async def _select_character(conn, user_id: int):
@@ -76,7 +80,9 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
         stamina_at=row["stamina_at"] if stamina_at is None else stamina_at,
         seclusion_at=row["seclusion_at"] or 0,
         spirit_stone=row["spirit_stone"], weapon_key=row["weapon_key"],
-        debuff_json=json.loads(row["debuff_json"] or "{}"))
+        debuff_json=json.loads(row["debuff_json"] or "{}"),
+        current_hp=row["current_hp"], current_mp=row["current_mp"],
+        hp_at=row["hp_at"], mp_at=row["mp_at"])
 
 
 COMBAT_MOD_KEYS = ("lifesteal_pct", "reflect_pct", "crit_resist", "pierce", "initiative")
@@ -261,6 +267,53 @@ async def stats(char: Character) -> dict:
         for key in R.STAT_KEYS:
             base[key] = max(1, int(base[key] * 0.9))
     return base
+
+
+def settled_vitals(char: Character, max_hp: int, max_mp: int, now: int) -> tuple:
+    """纯计算（不落库）：NULL⇒满、clamp 到 max（换装/降境致 max 下降）、按时间惰性回复。
+
+    返回 (hp, hp_at, mp, mp_at)。供 vitals() 落库与 _resolve 战前取值复用。
+    """
+    cur_hp = max_hp if char.current_hp is None else max(0, min(char.current_hp, max_hp))
+    cur_mp = max_mp if char.current_mp is None else max(0, min(char.current_mp, max_mp))
+    new_hp, new_hp_at = settle.regen_resource(
+        cur_hp, max_hp, char.hp_at or now, now, settle.HP_REGEN_SECONDS_PER_FULL)
+    new_mp, new_mp_at = settle.regen_resource(
+        cur_mp, max_mp, char.mp_at or now, now, settle.MP_REGEN_SECONDS_PER_FULL)
+    return new_hp, new_hp_at, new_mp, new_mp_at
+
+
+async def vitals(char: Character, now: int = None) -> dict:
+    """当前/最大 气血法力，并把结算后的当前值惰性落库（仿 get_at 的精力落库）。
+
+    返回 {"hp", "max_hp", "mp", "max_mp"}。供 /me、历练/秘境菜单使用（非写事务路径）。
+    """
+    now = int(time.time()) if now is None else now
+    st = await stats(char)
+    max_hp, max_mp = st["hp"], st["mp"]
+    hp, hp_at, mp, mp_at = settled_vitals(char, max_hp, max_mp, now)
+    if (hp != char.current_hp or mp != char.current_mp
+            or hp_at != char.hp_at or mp_at != char.mp_at):
+        await db.execute(
+            "UPDATE characters SET current_hp=?, current_mp=?, hp_at=?, mp_at=? WHERE user_id=?",
+            (hp, mp, hp_at, mp_at, char.user_id))
+    return {"hp": hp, "max_hp": max_hp, "mp": mp, "max_mp": max_mp}
+
+
+def floor_hp(max_hp: int, end_hp: int) -> int:
+    """活动结算写回的重伤地板：胜负都不破 20%·maxHP，且不超 max（#24）。"""
+    return min(max_hp, max(int(max_hp * settle.HP_FLOOR_PCT), max(0, end_hp)))
+
+
+async def write_vitals(user_id: int, hp: int, mp: int, now: int, conn=None):
+    """活动结算后写回当前气血/法力（锚点重置为 now）。conn 给定则走写事务内。"""
+    sql = ("UPDATE characters SET current_hp=?, current_mp=?, hp_at=?, mp_at=? "
+           "WHERE user_id=?")
+    params = (hp, mp, now, now, user_id)
+    if conn is not None:
+        await conn.execute(sql, params)
+    else:
+        await db.execute(sql, params)
 
 
 def _apply_equipment_bonus(base: dict, bonus: dict, enhance_level: int = 0):

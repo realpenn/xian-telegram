@@ -1,4 +1,7 @@
-"""经济回归测试(#16):买精力阶梯价/每日上限、补灵丹每日上限。"""
+"""经济回归测试(#16):买精力阶梯价/每日上限。
+
+补灵丹（原回精力，#16 有每日上限）已于 #24 改为回法力、脱离经济，相关用例移至 test_vitals。
+"""
 import time
 
 import pytest
@@ -78,26 +81,3 @@ async def test_render_shop_shows_next_stamina_buy_cost(temp_db):
     _, markup = await shop_handler.render_shop(uid, now=now)
     assert markup.inline_keyboard[0][0].text == (
         f"购买精力（🪙{shop_cfg.stamina_buy_cost(3, 3)} / ⚡{shop_cfg.STAMINA_BUY_GAIN}）")
-
-
-@pytest.mark.asyncio
-async def test_stamina_pill_daily_cap(temp_db):
-    uid = 5002
-    await character.create(uid, "tester")
-    await db.execute(
-        "UPDATE characters SET stamina=0, stamina_at=1000 WHERE user_id=?", (uid,))
-    await character.add_item(uid, "补灵丹", 10)
-
-    ok = 0
-    for _ in range(items.STAMINA_PILL_DAILY_LIMIT + 2):
-        await _drain(uid)
-        res = await items.use(uid, "补灵丹", now=1000)
-        if res["status"] == "stamina_ok":
-            ok += 1
-        else:
-            assert res["status"] == "pill_limit"
-    assert ok == items.STAMINA_PILL_DAILY_LIMIT
-
-    # 跨天恢复可用。
-    await db.execute("UPDATE characters SET stamina=0, stamina_at=? WHERE user_id=?", (1000 + DAY, uid))
-    assert (await items.use(uid, "补灵丹", now=1000 + DAY))["status"] == "stamina_ok"

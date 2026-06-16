@@ -27,6 +27,11 @@ RECIPES = {
         "stone": 80, "materials": {"灵草": 5, "妖丹": 2},
         "output": {"kind": "item", "key": "筑基丹", "qty": 1}, "default": True,
     },
+    "restore_pill": {
+        "name": "大还丹", "type": "alchemy", "realm": 2, "seconds": 45,
+        "stone": 100, "materials": {"天材地宝": 1, "妖丹": 2},
+        "output": {"kind": "item", "key": "大还丹", "qty": 1}, "default": True,
+    },
     "marrow_pill": {
         "name": "洗髓丹", "type": "alchemy", "realm": 2, "seconds": 45,
         "stone": 120, "materials": {"天材地宝": 1, "妖丹": 3},

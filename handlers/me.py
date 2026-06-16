@@ -22,6 +22,7 @@ async def render_me(user_id: int):
     if not char:
         return NEED_START, None
     st = await character.stats(char)
+    v = await character.vitals(char)
     cost = R.advance_cost(char.realm, char.stage)
     welfare = await character.sect_welfare(user_id)
     cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
@@ -34,8 +35,8 @@ async def render_me(user_id: int):
         f"修为：{char.cultivation}/{cost}  {progress_bar(char.cultivation, cost)}",
         f"🪙 灵石 {char.spirit_stone}    ⚡ 精力 {char.stamina}/{cap}",
         "—— 法身六维 ——",
-        f"气血 {st['hp']}　法力 {st['mp']}　攻击 {st['atk']}",
-        f"防御 {st['df']}　身法 {st['spd']}　暴击 {st['crit']}",
+        f"气血 {v['hp']}/{v['max_hp']}　法力 {v['mp']}/{v['max_mp']}",
+        f"攻击 {st['atk']}　防御 {st['df']}　身法 {st['spd']}　暴击 {st['crit']}",
         f"⚔️ 法宝：{item_name(char.weapon_key)}",
         "📖 心法：" + (skill_name(mind) if mind else "无"),
         "📖 战技：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),

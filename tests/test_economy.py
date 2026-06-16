@@ -1,6 +1,7 @@
 """经济回归测试(#16):买精力阶梯价/每日上限。
 
 补灵丹（原回精力，#16 有每日上限）已于 #24 改为回法力、脱离经济，相关用例移至 test_vitals。
+#28：商店在炼气期供应疗伤丹/补灵丹（筑基前半价、筑基后全价），相关用例见文件末尾。
 """
 import time
 
@@ -81,3 +82,47 @@ async def test_render_shop_shows_next_stamina_buy_cost(temp_db):
     _, markup = await shop_handler.render_shop(uid, now=now)
     assert markup.inline_keyboard[0][0].text == (
         f"购买精力（🪙{shop_cfg.stamina_buy_cost(3, 3)} / ⚡{shop_cfg.STAMINA_BUY_GAIN}）")
+
+
+@pytest.mark.asyncio
+async def test_recovery_pills_buyable_in_qi_at_half_price(temp_db):
+    """#28：炼气期能在商店买到疗伤丹/补灵丹（补给不再断档），且筑基前半价。"""
+    uid = 5005
+    await character.create(uid, "tester")  # 默认炼气期 realm 0
+    await character.add_stone(uid, 1000)
+
+    # 取价函数：炼气期半价（25/30），筑基起全价（50/60）。
+    assert shop_cfg.shop_price("疗伤丹", 0) == 25
+    assert shop_cfg.shop_price("补灵丹", 0) == 30
+    assert shop_cfg.shop_price("疗伤丹", 1) == 50
+    assert shop_cfg.shop_price("补灵丹", 1) == 60
+
+    # 炼气期实买：不再返回 locked，按半价扣费并入袋。
+    res = await shop.buy(uid, "疗伤丹")
+    assert res["status"] == "ok" and res["cost"] == 25
+    res = await shop.buy(uid, "补灵丹")
+    assert res["status"] == "ok" and res["cost"] == 30
+    assert await character.item_qty(uid, "疗伤丹") == 1
+    assert await character.item_qty(uid, "补灵丹") == 1
+
+    # 商店列表向炼气期玩家展示这两味并标注半价。
+    text, _ = await shop_handler.render_shop(uid)
+    assert "疗伤丹：25 灵石（炼气期半价）" in text
+    assert "补灵丹：30 灵石（炼气期半价）" in text
+
+
+@pytest.mark.asyncio
+async def test_recovery_pills_full_price_after_foundation(temp_db):
+    """#28：筑基后恢复丹全价（50/60），保证 /craft 自炼仍更省。"""
+    uid = 5006
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 1, 0, 0)  # 筑基期 realm 1
+    await character.add_stone(uid, 1000)
+
+    res = await shop.buy(uid, "疗伤丹")
+    assert res["status"] == "ok" and res["cost"] == 50
+    res = await shop.buy(uid, "补灵丹")
+    assert res["status"] == "ok" and res["cost"] == 60
+
+    text, _ = await shop_handler.render_shop(uid)
+    assert "（炼气期半价）" not in text

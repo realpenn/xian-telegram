@@ -6,7 +6,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import item_name, sell_price
-from config.shop import goods_for_realm
+from config.shop import goods_for_realm, shop_price
 from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
                              guard_private_callback, guard_private_message, main_menu, show)
 from services import character, shop
@@ -29,7 +29,9 @@ async def render_shop(user_id: int, now: int = None):
         text=stamina_text,
         callback_data=await action_callback_data(user_id, "shop:stamina"))])
     for key, good in goods_for_realm(char.realm):
-        lines.append(f"- {item_name(key)}：{good['price']} 灵石")
+        price = shop_price(key, char.realm)
+        tag = "（炼气期半价）" if good.get("qi_half") and price < good["price"] else ""
+        lines.append(f"- {item_name(key)}：{price} 灵石{tag}")
         rows.append([InlineKeyboardButton(
             text=f"买 {item_name(key)}",
             callback_data=await action_callback_data(user_id, f"shop:buy:{key}"))])

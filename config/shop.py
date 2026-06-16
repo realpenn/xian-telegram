@@ -6,6 +6,10 @@ SHOP_ITEMS = {
     "玄铁矿": {"price": 24, "realm": 1},
     "兽皮": {"price": 16, "realm": 0},
     "妖丹": {"price": 55, "realm": 1},
+    # 基础恢复丹（#28）：填补筑基前的回血/回蓝补给断层。炼气期还不能自炼（配方 realm≥1）、
+    # 收入也薄，故标 qi_half 在筑基前半价；筑基后恢复全价，且 /craft 自炼更省，引导转向自炼。
+    "疗伤丹": {"price": 50, "realm": 0, "qi_half": True},
+    "补灵丹": {"price": 60, "realm": 0, "qi_half": True},
     "虎力丹": {"price": 120, "realm": 0},
     "凝神丹": {"price": 120, "realm": 0},
     "筑基丹": {"price": 260, "realm": 0},
@@ -17,6 +21,20 @@ SHOP_ITEMS = {
     "洗髓丹丹方": {"price": 420, "realm": 2},
     "聚灵佩图纸": {"price": 460, "realm": 2},
 }
+
+
+FOUNDATION_REALM = 1  # realm 索引：0=炼气，1=筑基（见 config.realms）。
+
+
+def shop_price(item_key: str, realm: int) -> int:
+    """按境界取商店价：标 ``qi_half`` 的物品在筑基前（炼气期）半价（向上取整）。"""
+    good = SHOP_ITEMS.get(item_key)
+    if not good:
+        return 0
+    price = good["price"]
+    if good.get("qi_half") and realm < FOUNDATION_REALM:
+        return (price + 1) // 2
+    return price
 
 
 def goods_for_realm(realm: int):

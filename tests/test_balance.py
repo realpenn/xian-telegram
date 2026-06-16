@@ -11,8 +11,16 @@
 from config import realms as R
 from tools import balance_sim as B
 
-MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场"}
+MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场"}   # 各境界「易」档(向后兼容旧断言)
 DGN_OF = {1: "xuanming", 2: "qingyun", 3: "tianxu"}
+
+# 各大境界 (易, 中, 难) 三档地图(#20)。
+TIERS = {
+    0: ("后山", "碧萝竹海", "阴风古洞"),
+    1: ("妖兽森林", "赤霞岩谷", "枯骨沼泽"),
+    2: ("万妖岭", "碧毒蛟潭", "九霄雷泽"),
+    3: ("上古战场", "归墟裂谷", "天魔古原"),
+}
 
 
 # ---- 闭关按境界配时长(#15-1) ----
@@ -88,6 +96,40 @@ def test_world_boss_total_hp_scaled_not_one_shot():
         r = cfg["realm"]
         last = R.num_stages(r) - 1
         assert B.world_boss_kill_challenges(key, r, last) >= 8
+
+
+# ---- 历练地图扩展:每境界 3 档 + 难度/收益梯度(#20) ----
+
+def test_each_realm_has_three_difficulty_maps():
+    from config.maps import maps_at_realm
+    for r in range(4):
+        assert [m["difficulty"] for _, m in maps_at_realm(r)] == ["易", "中", "难"]
+
+
+def test_difficulty_gradient_on_cost_and_reward():
+    from config.maps import MAPS
+    for easy, mid, hard in TIERS.values():
+        e, m, h = MAPS[easy], MAPS[mid], MAPS[hard]
+        assert e["stamina"] < m["stamina"] < h["stamina"]            # 精力梯度
+        assert e["boss_rate"] <= m["boss_rate"] <= h["boss_rate"]    # 妖王率梯度
+        assert e["cult"] < m["cult"] < h["cult"]                     # 修为梯度
+        es, ms, hs = (sum(MAPS[k]["stone"]) / 2 for k in (easy, mid, hard))
+        assert es < ms < hs                                          # 灵石梯度
+
+
+def test_hard_maps_have_exclusive_drops():
+    from config.maps import MAPS
+    for easy, _mid, hard in TIERS.values():
+        easy_keys = {d[0] for d in MAPS[easy]["drops"]}
+        hard_only = {d[0] for d in MAPS[hard]["drops"]} - easy_keys
+        assert hard_only, f"{hard} 缺少独占掉落"
+
+
+def test_hard_maps_riskier_than_easy_at_entry():
+    # 同境界刚解锁时,难图连战胜率应明显低于易图(高风险)。
+    for r in (1, 2, 3):
+        easy, _mid, hard = TIERS[r]
+        assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
 
 # ---- 经济:买精力不能成为刷钱燃料(#16) ----

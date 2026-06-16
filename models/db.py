@@ -88,6 +88,8 @@ CREATE TABLE IF NOT EXISTS explore_runs (
     finish_at  INTEGER NOT NULL,
     seed       INTEGER NOT NULL,
     status     TEXT NOT NULL,
+    encounters INTEGER NOT NULL DEFAULT 1,
+    is_boss    INTEGER NOT NULL DEFAULT 0,
     notify_attempts INTEGER NOT NULL DEFAULT 0,
     notified_at INTEGER
 );
@@ -222,6 +224,10 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "item_instances", "enhance_level", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "sect_members", "donate_day", "TEXT")
     await _ensure_column(_conn, "sect_members", "donate_today", "INTEGER NOT NULL DEFAULT 0")
+    # 迁移时留空(NULL)而非填默认值，使部署前的在途历练落入 _resolve 的"旧 run"兼容分支
+    # （按 seed 还原旧规则的遭遇计划），不被静默改成 1 场非妖王。新 run 由 start() 显式写入。
+    await _ensure_column(_conn, "explore_runs", "encounters", "INTEGER")
+    await _ensure_column(_conn, "explore_runs", "is_boss", "INTEGER")
     await _ensure_column(_conn, "explore_runs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "notified_at", "INTEGER")
     await _ensure_column(_conn, "explore_runs", "notify_attempts", "INTEGER NOT NULL DEFAULT 0")

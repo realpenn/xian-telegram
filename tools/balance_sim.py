@@ -77,14 +77,16 @@ def map_winrates(realm: int, stage: int, map_key: str, profile=GEARED, n: int = 
 
 def map_run_winrate(realm: int, stage: int, map_key: str,
                     profile=GEARED, n: int = 300) -> float:
-    """复刻 explore._resolve 的小怪连战(1-3 个,血量结转)运行胜率。"""
+    """复刻 explore._resolve 的小怪连战(按难度 1/1-2/2-3 场,血量结转)运行胜率。"""
+    from services.explore import DIFFICULTY_PLAN
     m = MAPS[map_key]
+    lo, hi = DIFFICULTY_PLAN.get(m.get("difficulty", "易"), DIFFICULTY_PLAN["易"])["enc"]
     wins = 0
     for s in range(n):
         rng = random.Random(s)
         p = player(realm, stage, profile)
         ok = True
-        for _ in range(rng.randint(1, 3)):
+        for _ in range(rng.randint(lo, hi)):
             res = simulate(p, _mob(rng.choice(m["mobs"])), seed=rng.randint(1, 10_000_000))
             if res["winner"] is not p:
                 ok = False
@@ -137,8 +139,11 @@ def world_boss_kill_challenges(boss_key: str, realm: int, stage: int, n: int = 2
 # ---- 经济:套利 ----
 
 def map_stone_per_stamina(map_key: str) -> float:
+    """单位精力的灵石*期望*：含妖王双倍奖励按 boss_rate 计入（explore._resolve mult=2）。"""
     m = MAPS[map_key]
-    return (sum(m["stone"]) / 2) / m["stamina"]
+    avg = sum(m["stone"]) / 2
+    expected = avg * (1 + m["boss_rate"])   # 妖王战灵石×2
+    return expected / m["stamina"]
 
 
 def dungeon_stone_per_stamina(dungeon_key: str, reward_factor: float = 5.0) -> float:
@@ -171,7 +176,7 @@ def report() -> None:
                   f"hp{st['hp']:>6} atk{st['atk']:>5} df{st['df']:>5} "
                   f"spd{st['spd']:>4} crit{st['crit']:>4}")
     print("=" * 78)
-    print("地图胜率(满配):  小怪=连战(1-3怪)运行胜率, Boss=单场   [入门可刷, Boss 作后期门槛]")
+    print("地图胜率(满配):  小怪=按难度连战运行胜率, Boss=单场   [易可刷 / 中有险 / 难需成长]")
     for mkey, m in MAPS.items():
         r = m["realm"]
         last = R.num_stages(r) - 1

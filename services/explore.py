@@ -10,8 +10,33 @@ from models import db
 from services import character
 from services.combat import Combatant, simulate
 
-EXPLORE_DURATION_SECONDS = 10 * 60
-EXPLORE_DURATION_JITTER_SECONDS = 2 * 60
+# 历练时长与遭遇密度按难度绑定（#20）：开局即定遭遇计划与时长，结算复用。
+# enc=(最少, 最多) 场遭遇；minutes=(下限, 上限) 时长区间。
+DIFFICULTY_PLAN = {
+    "易": {"enc": (1, 1), "minutes": (8, 10)},
+    "中": {"enc": (1, 2), "minutes": (10, 13)},
+    "难": {"enc": (2, 3), "minutes": (13, 16)},
+}
+
+
+def _plan_minutes(m, is_boss: bool, n_enc: int) -> float:
+    plan = DIFFICULTY_PLAN.get(m.get("difficulty", "易"), DIFFICULTY_PLAN["易"])
+    lo, hi = plan["minutes"]
+    elo, ehi = plan["enc"]
+    if is_boss:
+        return hi                       # 妖王战耗时最长
+    if ehi == elo:
+        return (lo + hi) / 2
+    return lo + (hi - lo) * (n_enc - elo) / (ehi - elo)
+
+
+def _roll_plan(m, rng):
+    """开局决定本次遭遇计划：是否妖王 + 遭遇场数 + 时长。"""
+    plan = DIFFICULTY_PLAN.get(m.get("difficulty", "易"), DIFFICULTY_PLAN["易"])
+    is_boss = rng.random() < m["boss_rate"]
+    n_enc = 1 if is_boss else rng.randint(*plan["enc"])
+    seconds = int(_plan_minutes(m, is_boss, n_enc) * 60)
+    return is_boss, n_enc, seconds
 
 
 def _roll_drops(m, rng, drop_bonus: float = 0.0) -> dict:
@@ -95,22 +120,25 @@ async def start(user_id: int, map_key: str, now: int = None, rng=None) -> dict:
                 "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
                 (stamina, stamina_at, user_id))
             return {"status": "no_stamina", "need": cost, "have": stamina}
-        jitter = rng.randint(-EXPLORE_DURATION_JITTER_SECONDS, EXPLORE_DURATION_JITTER_SECONDS)
-        finish_at = now + EXPLORE_DURATION_SECONDS + jitter
+        # 开局即定遭遇计划与时长，并落库；结算阶段复用，使时长与战斗数量不脱钩（#20）。
+        is_boss, n_enc, seconds = _roll_plan(m, rng)
+        finish_at = now + seconds
         seed = rng.randint(1, 10_000_000)
         await conn.execute(
             "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
             (stamina - cost, stamina_at, user_id))
         await conn.execute(
-            "INSERT INTO explore_runs(user_id, map_key, start_at, finish_at, seed, status) "
-            "VALUES(?,?,?,?,?,'active')",
-            (user_id, map_key, now, finish_at, seed))
+            "INSERT INTO explore_runs(user_id, map_key, start_at, finish_at, seed, status, "
+            "encounters, is_boss) VALUES(?,?,?,?,?,'active',?,?)",
+            (user_id, map_key, now, finish_at, seed, n_enc, 1 if is_boss else 0))
         return {
             "status": "started",
             "map_key": map_key,
             "map": m["name"],
+            "difficulty": m.get("difficulty", "易"),
             "finish_at": finish_at,
             "seconds": finish_at - now,
+            "encounters": n_enc,
             "stamina_left": stamina - cost,
         }
 
@@ -128,7 +156,12 @@ async def collect(user_id: int, now: int = None, rng=None) -> dict:
         if row["finish_at"] > now:
             return _run_status(row, now)
         # 在同一事务内结算并删除，避免"已删但奖励未发"的崩溃窗口。
-        result = await _resolve(user_id, row["map_key"], row["seed"], now, rng, conn=conn)
+        # 旧库在途历练的 encounters/is_boss 为 NULL，传 None 触发 _resolve 的兼容分支。
+        stored_boss = row["is_boss"]
+        result = await _resolve(
+            user_id, row["map_key"], row["seed"], now, rng, conn=conn,
+            n_enc=row["encounters"],
+            is_boss=None if stored_boss is None else bool(stored_boss))
         await conn.execute("DELETE FROM explore_runs WHERE user_id=?", (user_id,))
         return result
 
@@ -137,7 +170,8 @@ async def explore(user_id: int, map_key: str, rng=None, now: int = None) -> dict
     return await start(user_id, map_key, now, rng)
 
 
-async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, conn=None) -> dict:
+async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, conn=None,
+                   n_enc: int = None, is_boss: bool = None) -> dict:
     m = MAPS.get(map_key)
     if not m:
         return {"status": "bad_map"}
@@ -156,8 +190,12 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
                        df=st["df"], spd=st["spd"], crit=st["crit"], skills=skills or ["普攻"],
                        **mods)
-    is_boss = rng.random() < m["boss_rate"]
-    mob_sources = [m["boss"]] if is_boss else [rng.choice(m["mobs"]) for _ in range(rng.randint(1, 3))]
+    if is_boss is None:
+        # 兼容无存储计划的旧 run：即时 roll 一份计划。
+        is_boss = rng.random() < m["boss_rate"]
+        n_enc = 1 if is_boss else rng.randint(1, 3)
+    mob_sources = ([m["boss"]] if is_boss
+                   else [rng.choice(m["mobs"]) for _ in range(max(1, n_enc or 1))])
     logs = []
     win = True
     for idx, mob_src in enumerate(mob_sources, 1):

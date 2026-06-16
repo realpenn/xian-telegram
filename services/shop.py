@@ -5,7 +5,7 @@ import time
 
 from config.items import item_name, sell_price
 from config.shop import (SHOP_ITEMS, STAMINA_BUY_DAILY_LIMIT, STAMINA_BUY_GAIN,
-                         stamina_buy_cost)
+                         shop_price, stamina_buy_cost)
 from config import realms as R
 from models import db
 
@@ -50,7 +50,7 @@ async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
             return {"status": "missing"}
         if char["realm"] < good["realm"]:
             return {"status": "locked"}
-        cost = good["price"] * qty
+        cost = shop_price(item_key, char["realm"]) * qty
         if char["spirit_stone"] < cost:
             return {"status": "no_stone", "need": cost, "have": char["spirit_stone"]}
         await conn.execute(

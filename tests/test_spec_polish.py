@@ -39,7 +39,7 @@ async def test_breakthrough_failure_sets_unstable_debuff(temp_db, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_tribulation_success_returns_three_logs(temp_db, monkeypatch):
+async def test_tribulation_success_uses_three_interactive_choices(temp_db, monkeypatch):
     uid = 4002
     await character.create(uid, "tester")
     last_zj = R.num_stages(1) - 1
@@ -49,9 +49,14 @@ async def test_tribulation_success_returns_three_logs(temp_db, monkeypatch):
 
     res = await breakthrough.try_advance(uid)
 
+    assert res["status"] == "tribulation_choice"
+    logs = []
+    for _ in range(3):
+        res = await breakthrough.choose_tribulation_action(uid, "artifact")
+        logs = res.get("tribulation_log", logs)
     assert res["status"] == "big_success"
     assert res["tribulation"]
-    assert len(res["tribulation_log"]) == 3
+    assert len(res["tribulation_log"]) == 6
 
 
 @pytest.mark.asyncio

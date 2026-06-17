@@ -32,8 +32,8 @@ async def test_pvp_duel_updates_ratings_and_reward(temp_db):
     assert {row["user_id"] for row in rows} == {a, b}
     assert any(row["rating"] != 1000 for row in rows)
     assert sum(row["reputation"] for row in rows) == pvp.WIN_REPUTATION + pvp.LOSS_REPUTATION
-    # PvP 不再即时发灵石（移除无成本 faucet，#14）；奖励改走周榜结算。
-    assert (await character.get(a)).spirit_stone == 100
+    # PvP 不再发可重复即时灵石；首胜只可能触发一次性成就奖励。
+    assert (await character.get(a)).spirit_stone in {100, 220}
 
 
 @pytest.mark.asyncio

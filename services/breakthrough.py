@@ -8,10 +8,12 @@ import json
 import random
 import time
 
+from config.events import TRIBULATION_ACTIONS
 from config.items import ITEMS
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
 from models import db
+from services import game_events
 
 FAIL_CULT_LOSS = 0.30
 UNSTABLE_SECONDS = 6 * 3600
@@ -70,21 +72,42 @@ async def _fail(conn, user_id: int, cultivation: int, rate: float, trib: bool,
     loss = int(cultivation * FAIL_CULT_LOSS) if loss is None else loss
     debuff = json.dumps({"unstable_until": now + UNSTABLE_SECONDS}, ensure_ascii=False)
     await conn.execute(
-        "UPDATE characters SET cultivation=?, debuff_json=? WHERE user_id=?",
-        (max(0, cultivation - loss), debuff, user_id))
+        "UPDATE characters SET cultivation=MAX(0, cultivation - ?), debuff_json=? WHERE user_id=?",
+        (loss, debuff, user_id))
     return {"status": "big_fail", "rate": rate, "tribulation": trib, "loss": loss,
             "tribulation_log": tribulation_log or [],
             "debuff_seconds": UNSTABLE_SECONDS}
 
 
-async def try_advance(user_id: int) -> dict:
-    now = int(time.time())
+def _tribulation_choices() -> list[dict]:
+    return [{"key": key, "label": cfg["label"]} for key, cfg in TRIBULATION_ACTIONS.items()]
+
+
+def _tribulation_status(row) -> dict:
+    return {"status": "tribulation_choice", "tribulation": True,
+            "thunder_index": row["thunder_index"], "total": 3,
+            "hp": row["hp"], "choices": _tribulation_choices(),
+            "tribulation_log": json.loads(row["log_json"] or "[]")}
+
+
+async def _session(conn, user_id: int):
+    cur = await conn.execute("SELECT * FROM tribulation_sessions WHERE user_id=?", (user_id,))
+    row = await cur.fetchone()
+    await cur.close()
+    return row
+
+
+async def try_advance(user_id: int, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
     async with db.transaction() as conn:
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
         if not char:
             return {"status": "missing"}
+        active = await _session(conn, user_id)
+        if active:
+            return _tribulation_status(active)
         if char["seclusion_at"]:
             return {"status": "in_seclusion"}
 
@@ -115,13 +138,27 @@ async def try_advance(user_id: int) -> dict:
                 return await _fail(conn, user_id, char["cultivation"], rate, trib, now=now)
             tribulation = {"survived": True, "log": []}
             if trib:
-                tribulation = tribulation_trial(
-                    char["realm"], char["stage"], char["root_bone"], mods["guard"])
+                stats = base_stats(char["realm"], char["stage"])
+                base_guard = int(stats["df"] * 0.6 + char["root_bone"] * 2 + mods["guard"])
+                await conn.execute(
+                    "INSERT OR REPLACE INTO tribulation_sessions("
+                    "user_id, source_realm, source_stage, target_realm, target_stage, "
+                    "cultivation, cost, rate, guard_bonus, hp, thunder_index, seed, log_json, created_at"
+                    ") VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (user_id, char["realm"], char["stage"], nxt[0], nxt[1],
+                     char["cultivation"], cost, rate, base_guard, stats["hp"], 1,
+                     random.randint(1, 10_000_000), "[]", now))
+                row = await _session(conn, user_id)
+                return _tribulation_status(row)
             if tribulation["survived"]:
                 await conn.execute(
                     "UPDATE characters SET realm=?, stage=?, cultivation=?, debuff_json='{}' "
                     "WHERE user_id=?",
                     (nxt[0], nxt[1], max(0, char["cultivation"] - cost), user_id))
+                await game_events.emit_conn(
+                    conn, user_id, "breakthrough.big_success",
+                    {"target_realm": nxt[0], "target_stage": nxt[1],
+                     "label": realm_label(nxt[0], nxt[1])}, now)
                 return {"status": "big_success", "rate": rate, "tribulation": trib,
                         "label": realm_label(nxt[0], nxt[1]),
                         "tribulation_log": tribulation["log"]}
@@ -133,3 +170,69 @@ async def try_advance(user_id: int) -> dict:
             "UPDATE characters SET realm=?, stage=?, cultivation=?, debuff_json='{}' WHERE user_id=?",
             (nxt[0], nxt[1], max(0, char["cultivation"] - cost), user_id))
         return {"status": "small_success", "label": realm_label(nxt[0], nxt[1])}
+
+
+async def choose_tribulation_action(user_id: int, action_key: str, now: int = None) -> dict:
+    now = int(time.time()) if now is None else now
+    action = TRIBULATION_ACTIONS.get(action_key)
+    if not action:
+        return {"status": "bad_action"}
+    async with db.transaction() as conn:
+        row = await _session(conn, user_id)
+        if not row:
+            return {"status": "no_tribulation"}
+        cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
+        char = await cur.fetchone()
+        await cur.close()
+        if not char:
+            return {"status": "missing"}
+        item_key = action.get("item")
+        if item_key:
+            cur = await conn.execute(
+                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?",
+                (user_id, item_key))
+            inv = await cur.fetchone()
+            await cur.close()
+            if not inv or inv["qty"] < 1:
+                return {"status": "need_item", "item": item_key}
+            await conn.execute(
+                "UPDATE inventory SET qty=MAX(0, qty-1) WHERE user_id=? AND item_key=?",
+                (user_id, item_key))
+
+        stats = base_stats(row["source_realm"], row["source_stage"])
+        max_hp = stats["hp"]
+        hp = min(max_hp, int(row["hp"]) + int(max_hp * float(action.get("heal_pct", 0.0) or 0.0)))
+        idx = int(row["thunder_index"])
+        rng = random.Random(int(row["seed"]) + idx * 104729)
+        raw = int((stats["hp"] * 0.18 + stats["df"] * 1.8) * (0.9 + rng.random() * 0.2))
+        shield = int(row["guard_bonus"]) + int(action.get("shield", 0) or 0)
+        dmg = max(1, raw - shield)
+        hp -= dmg
+        logs = json.loads(row["log_json"] or "[]")
+        logs.append(action["text"])
+        logs.append(f"第 {idx} 道雷劫落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
+        if hp <= 0:
+            await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
+            return await _fail(conn, user_id, row["cultivation"], row["rate"], True,
+                               tribulation_log=logs, now=now)
+        if idx >= 3:
+            await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
+            await conn.execute(
+                "UPDATE characters SET realm=?, stage=?, "
+                "cultivation=MAX(0, cultivation - ?), debuff_json='{}' "
+                "WHERE user_id=?",
+                (row["target_realm"], row["target_stage"], row["cost"], user_id))
+            label = realm_label(row["target_realm"], row["target_stage"])
+            await game_events.emit_conn(
+                conn, user_id, "breakthrough.big_success",
+                {"target_realm": row["target_realm"], "target_stage": row["target_stage"],
+                 "label": label}, now)
+            return {"status": "big_success", "rate": row["rate"], "tribulation": True,
+                    "label": label, "tribulation_log": logs}
+        await conn.execute(
+            "UPDATE tribulation_sessions SET hp=?, thunder_index=?, log_json=? WHERE user_id=?",
+            (hp, idx + 1, json.dumps(logs, ensure_ascii=False), user_id))
+        updated = await _session(conn, user_id)
+        res = _tribulation_status(updated)
+        res["last_log"] = logs[-2:]
+        return res

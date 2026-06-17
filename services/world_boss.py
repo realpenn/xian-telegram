@@ -11,7 +11,7 @@ from config.bosses import (DEFAULT_BOSS, WORLD_BOSSES, WORLD_BOSS_FULL_HP_CULTIV
                            boss_key_for_realm, canonical_boss_key)
 from config.items import item_name
 from handlers.common import action_callback_data
-from services import character
+from services import character, game_events
 from services.combat import Combatant, simulate
 from models import db
 
@@ -280,6 +280,11 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
         if remaining <= 0:
             defeated = True
             rewards = await _distribute(conn, current["id"], cfg)
+        await game_events.emit_conn(
+            conn, user_id, "world_boss.challenge",
+            {"boss_key": current["boss_key"], "boss_name": cfg["name"],
+             "damage": damage, "defeated": defeated, "amount": 1},
+            now)
 
     return {"status": "ok", "damage": damage, "remaining_hp": remaining,
             "total_hp": boss["total_hp"], "boss_name": cfg["name"], "defeated": defeated,

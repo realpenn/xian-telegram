@@ -65,14 +65,18 @@ def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: in
                                   root_bone: int = 0,
                                   place_factor: float = 1.0,
                                   offline_cap_hours: int = OFFLINE_CAP_HOURS,
-                                  remainder_units: int = 0) -> tuple[int, int]:
+                                  remainder_units: int = 0,
+                                  activity_windows: list[tuple[int, int]] = None,
+                                  active_factor: float = 1.0) -> tuple[int, int]:
     """当前小阶 24 小时约得一级；根骨/外部加成再提速。"""
     elapsed = min(now - start_at, offline_cap_hours * 3600)
     if elapsed < 0:
         elapsed = 0
+    effective_elapsed = _effective_elapsed(
+        start_at, start_at + elapsed, activity_windows or [], active_factor)
     raw_units = int(
         R.advance_cost(realm, stage)
-        * elapsed
+        * effective_elapsed
         * (1 + max(0, root_bone) / 200)
         * max(0.0, place_factor)
         * CULTIVATION_SCALE
@@ -80,3 +84,24 @@ def seclusion_gain_with_remainder(realm: int, stage: int, start_at: int, now: in
     )
     total_units = raw_units + max(0, int(remainder_units or 0))
     return total_units // CULTIVATION_SCALE, total_units % CULTIVATION_SCALE
+
+
+def _effective_elapsed(start_at: int, finish_at: int,
+                       activity_windows: list[tuple[int, int]],
+                       active_factor: float) -> float:
+    total = max(0, finish_at - start_at)
+    if total <= 0 or not activity_windows:
+        return total
+    active_factor = max(0.0, min(1.0, float(active_factor)))
+    merged = []
+    for raw_start, raw_finish in sorted(activity_windows):
+        s = max(start_at, int(raw_start))
+        f = min(finish_at, int(raw_finish))
+        if f <= s:
+            continue
+        if merged and s <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], f))
+        else:
+            merged.append((s, f))
+    active = sum(f - s for s, f in merged)
+    return (total - active) + active * active_factor

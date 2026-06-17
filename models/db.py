@@ -90,8 +90,28 @@ CREATE TABLE IF NOT EXISTS explore_runs (
     status     TEXT NOT NULL,
     encounters INTEGER NOT NULL DEFAULT 1,
     is_boss    INTEGER NOT NULL DEFAULT 0,
+    event_key  TEXT,
+    event_seed INTEGER,
+    event_choice TEXT,
     notify_attempts INTEGER NOT NULL DEFAULT 0,
     notified_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS activity_windows (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    source_key  TEXT,
+    start_at    INTEGER NOT NULL,
+    finish_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_activity_windows_user_time
+ON activity_windows(user_id, finish_at, start_at);
+CREATE TABLE IF NOT EXISTS explore_mastery (
+    user_id          INTEGER NOT NULL,
+    map_key          TEXT NOT NULL,
+    consecutive_wins INTEGER NOT NULL DEFAULT 0,
+    last_result_at   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, map_key)
 );
 CREATE TABLE IF NOT EXISTS dungeon_jobs (
     user_id     INTEGER PRIMARY KEY,
@@ -174,6 +194,64 @@ CREATE TABLE IF NOT EXISTS daily (
     last_checkin_day TEXT,
     streak           INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS quest_progress (
+    user_id   INTEGER NOT NULL,
+    quest_key TEXT NOT NULL,
+    period    TEXT NOT NULL,
+    progress  INTEGER NOT NULL DEFAULT 0,
+    claimed   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, quest_key, period)
+);
+CREATE TABLE IF NOT EXISTS achievements (
+    user_id     INTEGER NOT NULL,
+    key         TEXT NOT NULL,
+    unlocked_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+CREATE TABLE IF NOT EXISTS tribulation_sessions (
+    user_id       INTEGER PRIMARY KEY,
+    source_realm  INTEGER NOT NULL,
+    source_stage  INTEGER NOT NULL,
+    target_realm  INTEGER NOT NULL,
+    target_stage  INTEGER NOT NULL,
+    cultivation   INTEGER NOT NULL,
+    cost          INTEGER NOT NULL,
+    rate          REAL NOT NULL,
+    guard_bonus   INTEGER NOT NULL DEFAULT 0,
+    hp            INTEGER NOT NULL,
+    thunder_index INTEGER NOT NULL DEFAULT 1,
+    seed          INTEGER NOT NULL,
+    log_json      TEXT NOT NULL DEFAULT '[]',
+    created_at    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS social_broadcasts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id        INTEGER,
+    user_id        INTEGER NOT NULL,
+    event_type     TEXT NOT NULL,
+    text           TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'pending',
+    attempts       INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL,
+    sent_at        INTEGER,
+    next_attempt_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_social_broadcasts_pending
+ON social_broadcasts(status, next_attempt_at, id);
+CREATE TABLE IF NOT EXISTS social_broadcast_limits (
+    user_id    INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    period     TEXT NOT NULL,
+    count      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, event_type, period)
+);
+CREATE TABLE IF NOT EXISTS pvp_rank_snapshots (
+    user_id      INTEGER PRIMARY KEY,
+    tier         TEXT,
+    top_rank     INTEGER,
+    rating       INTEGER NOT NULL DEFAULT 1000,
+    updated_at   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS bot_chats (
     chat_id       INTEGER PRIMARY KEY,
     title         TEXT,
@@ -242,6 +320,9 @@ async def init_db(path: str = None):
     # 旧在途 run 无快照(NULL) → _resolve 视作满血出发（兼容）。
     await _ensure_column(_conn, "explore_runs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "explore_runs", "start_mp", "INTEGER")
+    await _ensure_column(_conn, "explore_runs", "event_key", "TEXT")
+    await _ensure_column(_conn, "explore_runs", "event_seed", "INTEGER")
+    await _ensure_column(_conn, "explore_runs", "event_choice", "TEXT")
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _conn.commit()

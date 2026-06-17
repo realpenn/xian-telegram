@@ -1,14 +1,16 @@
 """/start —— 注册 + 测灵根。"""
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
-from handlers.common import guard_private_message, main_menu
+from handlers.common import guard_private_callback, guard_private_message, main_menu, show
 from services import character
 
 router = Router()
+
+MENU_TEXT = "🏯 主菜单\n道友请择一处前往，或发送 /me 查看道行。"
 
 
 @router.message(Command("start"))
@@ -31,3 +33,11 @@ async def cmd_start(message: Message):
         "发送 /help 查看修行法门，或点下方按钮起步。"
     )
     await message.answer(text, reply_markup=main_menu())
+
+
+@router.callback_query(F.data == "nav:menu")
+async def cb_menu(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    await show(callback, MENU_TEXT, main_menu())
+    await callback.answer()

@@ -105,8 +105,8 @@ async def test_recovery_pills_buyable_in_qi_at_half_price(temp_db):
     assert await character.item_qty(uid, "疗伤丹") == 1
     assert await character.item_qty(uid, "补灵丹") == 1
 
-    # 商店列表向炼气期玩家展示这两味并标注半价。
-    text, _ = await shop_handler.render_shop(uid)
+    # 丹药分类页向炼气期玩家展示这两味并标注半价（#30 首页不再列单品）。
+    text, _ = await shop_handler.render_category(uid, "pill")
     assert "疗伤丹：25 灵石（炼气期半价）" in text
     assert "补灵丹：30 灵石（炼气期半价）" in text
 
@@ -124,5 +124,70 @@ async def test_recovery_pills_full_price_after_foundation(temp_db):
     res = await shop.buy(uid, "补灵丹")
     assert res["status"] == "ok" and res["cost"] == 60
 
-    text, _ = await shop_handler.render_shop(uid)
+    text, _ = await shop_handler.render_category(uid, "pill")
     assert "（炼气期半价）" not in text
+
+
+def _datas(markup):
+    return [b.callback_data for row in markup.inline_keyboard for b in row]
+
+
+def _texts(markup):
+    return [b.text for row in markup.inline_keyboard for b in row]
+
+
+@pytest.mark.asyncio
+async def test_shop_home_summary_entries_and_no_full_menu(temp_db):
+    """#30：首页只展示摘要 + 精力 + 分类入口 + 返回主菜单，不再追加完整主菜单。"""
+    uid = 5007
+    await character.create(uid, "tester")  # 炼气期 realm 0
+    await db.execute("DELETE FROM inventory WHERE user_id=?", (uid,))
+
+    text, markup = await shop_handler.render_shop(uid)
+    # 炼气期可购：材料 2（灵草/兽皮）· 丹药 4 · 突破 1（筑基丹）；丹方此境界无。
+    assert "🛒 可购：材料 2 · 丹药 4 · 突破 1" in text
+    datas = _datas(markup)
+    # 非空分类有入口，空分类（丹方）无入口；无可回收物时不显示卖物品。
+    assert {"shop:cat:material", "shop:cat:pill", "shop:cat:breakthrough"} <= set(datas)
+    assert "shop:cat:recipe" not in datas
+    assert "shop:cat:sell" not in datas
+    # 不再追加完整主菜单：除返回主菜单外不含其它 nav 项；保留单一返回主菜单。
+    assert "nav:cultivate" not in datas and "nav:bag" not in datas
+    assert markup.inline_keyboard[-1][-1].callback_data == "nav:menu"
+    # 首行仍是精力按钮（render 测试契约）。
+    assert markup.inline_keyboard[0][0].callback_data.startswith("shop:stamina:")
+
+    # 持有可回收物后，首页出现卖物品入口。
+    await shop.buy(uid, "疗伤丹")  # 疗伤丹可回收（sell 20）
+    _, markup = await shop_handler.render_shop(uid)
+    text2, _ = await shop_handler.render_shop(uid)
+    assert "shop:cat:sell" in _datas(markup)
+    assert "♻️ 可回收：1 种" in text2
+
+
+@pytest.mark.asyncio
+async def test_shop_category_page_lists_goods_with_priced_buttons(temp_db):
+    """#30：分类页列出该类商品及价格，按钮文字自带价格，并可返回商店。"""
+    uid = 5008
+    await character.create(uid, "tester")
+
+    text, markup = await shop_handler.render_category(uid, "material")
+    assert "灵草" in text and "兽皮" in text
+    assert "灵草 12" in _texts(markup)  # 按钮带价格
+    assert any(d.startswith("shop:buy:灵草:") for d in _datas(markup))  # 沿用一次性 token
+    assert markup.inline_keyboard[-1][-1].callback_data == "nav:shop"
+
+
+@pytest.mark.asyncio
+async def test_shop_sell_page_lists_sellables(temp_db):
+    """#30：回收页展示可回收物、数量、单价，并能发起出售。"""
+    uid = 5009
+    await character.create(uid, "tester")
+    await db.execute("DELETE FROM inventory WHERE user_id=?", (uid,))
+    await shop.buy(uid, "疗伤丹")  # 入手一件可回收物（sell 20）
+
+    text, markup = await shop_handler.render_category(uid, "sell")
+    assert "疗伤丹×1：20 灵石/个" in text
+    assert "卖 疗伤丹 20" in _texts(markup)
+    assert any(d.startswith("shop:sell:疗伤丹:") for d in _datas(markup))
+    assert markup.inline_keyboard[-1][-1].callback_data == "nav:shop"

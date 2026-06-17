@@ -13,7 +13,7 @@ from config.sects import welfare as sect_welfare_config
 from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTER_SKILL,
                            is_mind_skill, skill_bonus)
 from models import db
-from services import settle
+from services import activity, settle
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
@@ -159,8 +159,7 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
         # 不把人留在闭关里（否则会挡住其本次想做的操作）；进行中的定时任务则避开。
         if row and not row["seclusion_at"]:
             last_seen = int(user["last_seen_at"] or user["created_at"] or now)
-            if (now - last_seen >= AUTO_SECLUSION_IDLE_SECONDS
-                    and not await _has_active_job(conn, user_id)):
+            if now - last_seen >= AUTO_SECLUSION_IDLE_SECONDS:
                 settle_start = last_seen + AUTO_SECLUSION_IDLE_SECONDS
                 welfare = await _sect_welfare(conn, user_id)
                 state = json.loads(row["debuff_json"] or "{}")
@@ -168,11 +167,14 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                     (1 + welfare["seclusion_pct"])
                     * (1 + temporary_seclusion_pct(state, now))
                 )
+                windows = await activity.windows_for(user_id, settle_start, now, conn=conn)
                 auto_gain, remainder = settle.seclusion_gain_with_remainder(
                     row["realm"], row["stage"], settle_start, now,
                     root_bone=row["root_bone"], place_factor=place_factor,
                     remainder_units=_seclusion_remainder(state, row["realm"], row["stage"]),
-                    offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
+                    offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"],
+                    activity_windows=windows,
+                    active_factor=activity.SECLUSION_ACTIVE_FACTOR)
                 _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
                 await conn.execute(
                     "UPDATE characters SET cultivation = cultivation + ?, debuff_json = ? "
@@ -640,20 +642,6 @@ async def start_seclusion(user_id: int, now: int = None) -> dict:
             return {"status": "missing"}
         if row["seclusion_at"]:
             return {"status": "already"}
-        cur = await conn.execute(
-            "SELECT 1 FROM explore_runs WHERE user_id=? AND status='active'",
-            (user_id,))
-        busy = await cur.fetchone()
-        await cur.close()
-        if busy:
-            return {"status": "busy_explore"}
-        cur = await conn.execute(
-            "SELECT 1 FROM dungeon_jobs WHERE user_id=? AND status='active'",
-            (user_id,))
-        busy = await cur.fetchone()
-        await cur.close()
-        if busy:
-            return {"status": "busy_dungeon"}
         welfare = await _sect_welfare(conn, user_id)
         stamina, stamina_at = _settled_stamina(row, now, welfare)
         await conn.execute(
@@ -677,12 +665,17 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             (1 + welfare["seclusion_pct"])
             * (1 + temporary_seclusion_pct(state, now))
         )
+        cap_seconds = (settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"]) * 3600
+        window_end = min(now, int(row["seclusion_at"]) + cap_seconds)
+        windows = await activity.windows_for(user_id, row["seclusion_at"], window_end, conn=conn)
         gained, remainder_units = settle.seclusion_gain_with_remainder(
             row["realm"], row["stage"], row["seclusion_at"], now,
             root_bone=row["root_bone"],
             place_factor=place_factor,
             remainder_units=_seclusion_remainder(state, row["realm"], row["stage"]),
-            offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"])
+            offline_cap_hours=settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"],
+            activity_windows=windows,
+            active_factor=activity.SECLUSION_ACTIVE_FACTOR)
         _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
         new_cult = row["cultivation"] + gained
         await conn.execute(

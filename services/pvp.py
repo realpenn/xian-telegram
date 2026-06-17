@@ -5,6 +5,7 @@ import random
 import time
 
 from services import character
+from services import game_events, social
 from services.combat import Combatant, simulate
 from models import db
 
@@ -60,6 +61,18 @@ async def _rating(conn, user_id: int):
     row = await cur.fetchone()
     await cur.close()
     return row
+
+
+async def _rank_for_conn(conn, user_id: int, limit: int = 10):
+    cur = await conn.execute(
+        "SELECT user_id FROM pvp_ratings ORDER BY rating DESC, wins DESC LIMIT ?",
+        (limit,))
+    rows = await cur.fetchall()
+    await cur.close()
+    for idx, row in enumerate(rows, 1):
+        if row["user_id"] == user_id:
+            return idx
+    return None
 
 
 async def random_opponent(user_id: int):
@@ -201,9 +214,14 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
     async with db.transaction() as conn:
         ar = await _rating(conn, attacker_id)
         dr = await _rating(conn, defender_id)
+        old_a_rating, old_d_rating = ar["rating"], dr["rating"]
+        old_a_rank = await _rank_for_conn(conn, attacker_id)
+        old_d_rank = await _rank_for_conn(conn, defender_id)
         score = 1.0 if attacker_win else 0.0
         change = _delta(ar["rating"], dr["rating"], score)
         defender_change = _delta(dr["rating"], ar["rating"], 1.0 - score)
+        new_a_rating = max(0, ar["rating"] + change)
+        new_d_rating = max(0, dr["rating"] + defender_change)
         # 同一对手每日只计一次有效声望，降低互刷价值（积分仍照常变动，零和不通胀）。
         u1, u2 = sorted((attacker_id, defender_id))
         cur = await conn.execute(
@@ -221,18 +239,28 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
         await conn.execute(
             "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+?, "
             "week_reputation=?, week_tag=? WHERE user_id=?",
-            (max(0, ar["rating"] + change), attacker_rep, 1 if attacker_win else 0,
+            (new_a_rating, attacker_rep, 1 if attacker_win else 0,
              0 if attacker_win else 1, a_week, week, attacker_id))
         await conn.execute(
             "UPDATE pvp_ratings SET rating=?, reputation=reputation+?, wins=wins+?, losses=losses+?, "
             "week_reputation=?, week_tag=? WHERE user_id=?",
-            (max(0, dr["rating"] + defender_change), defender_rep, 0 if attacker_win else 1,
+            (new_d_rating, defender_rep, 0 if attacker_win else 1,
              1 if attacker_win else 0, d_week, week, defender_id))
         # 不再即时发放灵石：移除无成本 faucet，改由 settle_weekly 按排名发奖池（#14）。
+        winner_id = attacker_id if attacker_win else defender_id
+        await game_events.emit_conn(
+            conn, winner_id, "pvp.win",
+            {"attacker_id": attacker_id, "defender_id": defender_id, "amount": 1}, now)
+        new_a_rank = await _rank_for_conn(conn, attacker_id)
+        new_d_rank = await _rank_for_conn(conn, defender_id)
+        await social.queue_rank_change_conn(
+            conn, attacker_id, old_a_rating, new_a_rating, old_a_rank, new_a_rank, now)
+        await social.queue_rank_change_conn(
+            conn, defender_id, old_d_rating, new_d_rating, old_d_rank, new_d_rank, now)
 
     return {"status": "ok", "win": attacker_win, "rating_delta": change,
             "reputation_gain": attacker_rep, "reputation_counted": rep_counts,
-            "tier": tier(max(0, ar["rating"] + change)),
+            "tier": tier(new_a_rating),
             "defender_id": defender_id, "log": result["log"],
             "rounds": result["rounds"],
             "attacker_name": attacker_name, "defender_name": defender_name}

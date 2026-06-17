@@ -8,6 +8,7 @@ from config.sects import (CREATE_REALM, CREATE_STONE_COST, DONATE_DAILY_CONTRIBU
                           DONATE_STONE_PER_CONTRIBUTION, SECT_SHOP, TASK_CONTRIBUTION,
                           TASK_STONE_REWARD, upgrade_cost, upgrade_stone_cost)
 from models import db
+from services import game_events
 
 
 def _day(ts: int) -> str:
@@ -222,6 +223,10 @@ async def upgrade(user_id: int) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (stone_cost, user_id))
+        await game_events.emit_conn(
+            conn, user_id, "sect.upgrade",
+            {"sect": row["name"], "level": row["level"] + 1, "amount": 1},
+            int(time.time()))
         return {"status": "upgraded", "name": row["name"], "level": row["level"] + 1,
                 "cost": cost, "stone_cost": stone_cost}
 

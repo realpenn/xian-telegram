@@ -8,7 +8,7 @@ import time
 from config.items import ITEMS, item_name
 from config.recipes import ACCELERATE_STONE_PER_MINUTE, RECIPES
 from models import db
-from services import character
+from services import activity, character, game_events
 
 
 def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
@@ -90,6 +90,10 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                 f"UPDATE characters SET {column} = {column} + 1 WHERE user_id=?",
                 (user_id,))
             await conn.execute("UPDATE crafting_jobs SET status='done' WHERE id=?", (job["id"],))
+            await game_events.emit_conn(
+                conn, user_id, "craft.done",
+                {"recipe_key": job["recipe_key"], "craft_type": recipe["type"], "amount": 1},
+                now)
     return collected
 
 
@@ -105,8 +109,6 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
         await cur.close()
         if not char:
             return {"status": "missing"}
-        if char["seclusion_at"]:
-            return {"status": "in_seclusion"}
         if char["realm"] < recipe["realm"]:
             return {"status": "locked"}
         if not recipe.get("default", False):
@@ -144,6 +146,7 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
             "INSERT INTO crafting_jobs(user_id, craft_type, recipe_key, start_at, finish_at, status) "
             "VALUES(?,?,?,?,?,'active')",
             (user_id, recipe["type"], recipe_key, now, finish_at))
+        await activity.record_window(user_id, "craft", recipe_key, now, finish_at, conn=conn)
         return {"status": "started", "name": recipe["name"], "finish_at": finish_at,
                 "seconds": recipe["seconds"]}
 

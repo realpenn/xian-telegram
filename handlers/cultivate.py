@@ -5,6 +5,7 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
+from config.events import TRIBULATION_ACTIONS
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              action_callback_data, consume_action_callback, main_menu,
                              menu_with_breakthrough, show)
@@ -65,6 +66,17 @@ def _bt_text(res: dict) -> str:
         return "道友已臻元婴圆满，乃此界之绝巅（化神之境，留待来日开启）。"
     if s == "need_pill":
         return f"大境界突破需「{res['pill']}」护道，道友尚缺此物。"
+    if s == "tribulation_choice":
+        tail = "\n".join(res.get("last_log") or res.get("tribulation_log") or [])
+        prefix = f"⚡ 天劫未尽，第 {res['thunder_index']}/{res.get('total', 3)} 道雷将落。"
+        hp = f"\n当前气血：{res['hp']}" if res.get("hp") is not None else ""
+        return "\n".join(line for line in [prefix + hp, tail, "请选择应对。"] if line)
+    if s == "need_item":
+        return f"缺少「{res['item']}」，此法暂不可用。"
+    if s == "bad_action":
+        return "此应劫之法不可用。"
+    if s == "no_tribulation":
+        return "当前没有进行中的天劫。"
     if s == "small_success":
         return f"📈 水到渠成，道友晋入 {res['label']}！"
     if s == "big_success":
@@ -80,6 +92,18 @@ def _bt_text(res: dict) -> str:
             f"法身六维暂降），所幸未曾跌境。来日再战。{tail}"
         )
     return "天机紊乱，突破未果。"
+
+
+async def _bt_markup(user_id: int, res: dict):
+    if res["status"] != "tribulation_choice":
+        return main_menu()
+    rows = []
+    for choice in res.get("choices", []):
+        rows.append([InlineKeyboardButton(
+            text=choice["label"],
+            callback_data=await action_callback_data(user_id, f"bt:trib:{choice['key']}"))])
+    rows += main_menu().inline_keyboard
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 @router.message(Command("cultivate"))
@@ -117,5 +141,18 @@ async def cb_breakthrough(callback: CallbackQuery):
     if await consume_action_callback(callback) != "bt:do":
         return
     res = await breakthrough.try_advance(callback.from_user.id)
-    await show(callback, _bt_text(res), main_menu())
+    await show(callback, _bt_text(res), await _bt_markup(callback.from_user.id, res))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("bt:trib:"))
+async def cb_tribulation(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("bt:trib:"):
+        return
+    res = await breakthrough.choose_tribulation_action(
+        callback.from_user.id, action.rsplit(":", 1)[1])
+    await show(callback, _bt_text(res), await _bt_markup(callback.from_user.id, res))
     await callback.answer()

@@ -12,7 +12,7 @@ from config.items import item_name
 from config.skills import skill_name
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
                              menu_with_breakthrough, progress_bar, show)
-from services import character
+from services import character, quests
 
 router = Router()
 
@@ -43,6 +43,10 @@ async def render_me(user_id: int):
     ]
     if int(char.debuff_json.get("unstable_until", 0)) > int(time.time()):
         lines.append("⚠️ 道基不稳：法身六维暂降。")
+    ach = (await quests.list_status(user_id))["achievements"]
+    if ach:
+        shown = "、".join(quests.achievement_name(row["key"]) for row in ach[:3])
+        lines.append(f"🏅 成就：{shown}")
     can_advance = char.cultivation >= cost and not char.seclusion_at
     return "\n".join(lines), await menu_with_breakthrough(user_id, can_advance)
 

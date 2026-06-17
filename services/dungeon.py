@@ -7,7 +7,7 @@ import time
 from config import realms as R
 from config.dungeons import DUNGEONS
 from config.items import ITEMS, item_name
-from services import character, settle
+from services import activity, character, game_events, settle
 from services.combat import Combatant, simulate
 from models import db
 
@@ -90,11 +90,6 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
             return {"status": "locked", "need": R.realm_label(d["realm"], 0)}
         welfare = await character._sect_welfare(conn, user_id)
         stamina, stamina_at = character._settled_stamina(row, now, welfare)
-        if row["seclusion_at"]:
-            await conn.execute(
-                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
-                (stamina, stamina_at, user_id))
-            return {"status": "in_seclusion"}
         cur = await conn.execute(
             "SELECT runs FROM dungeon_runs WHERE user_id=? AND dungeon_key=? AND day=?",
             (user_id, dungeon_key, _day(now)))
@@ -132,6 +127,7 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
             "INSERT INTO dungeon_jobs(user_id, dungeon_key, start_at, finish_at, seed, status, "
             "start_hp, start_mp) VALUES(?,?,?,?,?,'active',?,?)",
             (user_id, dungeon_key, now, finish_at, seed, start_hp, start_mp))
+        await activity.record_window(user_id, "dungeon", dungeon_key, now, finish_at, conn=conn)
         return {
             "status": "started",
             "dungeon_key": dungeon_key,
@@ -238,6 +234,13 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     final_hp, _ = settle.regen_resource(combat_hp, max_hp, anchor, now, settle.HP_REGEN_SECONDS_PER_FULL)
     final_mp, _ = settle.regen_resource(combat_mp, max_mp, anchor, now, settle.MP_REGEN_SECONDS_PER_FULL)
     await character.write_vitals(user_id, final_hp, final_mp, now, conn=conn)
+    if conn is not None and cleared:
+        payload = {"dungeon_key": dungeon_key, "dungeon": d["name"],
+                   "cleared": cleared, "layers": d["layers"], "amount": cleared}
+        await game_events.emit_conn(conn, user_id, "dungeon.layer", payload, now)
+        if cleared == d["layers"]:
+            await game_events.emit_conn(conn, user_id, "dungeon.clear",
+                                        {**payload, "amount": 1}, now)
 
     return {"status": "ok", "dungeon_key": dungeon_key, "dungeon": d["name"],
             "cleared": cleared, "layers": d["layers"],

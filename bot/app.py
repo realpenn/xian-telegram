@@ -13,7 +13,8 @@ from handlers import (bag, boss, craft, cultivate, daily, dungeon, explore,
                       help as help_h, me, pvp, rank, sect, shop, skills, start)
 from handlers.common import cleanup_callback_tokens
 from models import db
-from services import character, notifications, world_boss
+from handlers import quest
+from services import activity, character, notifications, social, world_boss
 from services import pvp as pvp_service
 
 
@@ -45,6 +46,7 @@ _COMMANDS = [
     BotCommand(command="boss", description="世界 Boss"),
     BotCommand(command="sect", description="宗门"),
     BotCommand(command="daily", description="每日签到"),
+    BotCommand(command="quest", description="悬赏任务"),
     BotCommand(command="bag", description="储物袋"),
     BotCommand(command="help", description="指南"),
 ]
@@ -68,11 +70,14 @@ async def main():
     # 周日 23:55（仍属当周 %W）结算 PvP 周榜奖池（#14）。
     scheduler.add_job(pvp_service.settle_weekly, "cron", day_of_week="sun", hour=23, minute=55)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
+    scheduler.add_job(activity.cleanup, "interval", hours=6)
     scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])
+    scheduler.add_job(social.flush_broadcasts, "interval", minutes=1, args=[bot])
     scheduler.start()
     dp = Dispatcher()
     dp.update.middleware(ActivityMiddleware())
     for module in (start, me, cultivate, explore, dungeon, craft, skills, shop, bag,
+                   quest,
                    pvp, rank, boss, sect, daily, help_h):
         dp.include_router(module.router)
 

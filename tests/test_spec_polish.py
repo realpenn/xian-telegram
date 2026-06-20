@@ -140,6 +140,7 @@ async def test_pvp_random_opponent_prefers_rating_band(temp_db):
     await db.execute(
         "INSERT INTO pvp_ratings(user_id, rating) VALUES(?, ?), (?, ?), (?, ?)",
         (uid, 1000, close_uid, 1100, far_uid, 1600))
+    await db.execute("UPDATE characters SET seclusion_at=? WHERE user_id=?", (1000, close_uid))
 
     assert await pvp.random_opponent(uid) == close_uid
 

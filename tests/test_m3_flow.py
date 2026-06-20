@@ -51,6 +51,23 @@ async def test_pvp_same_opponent_counts_reputation_once_per_day(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_pvp_allows_secluded_players(temp_db):
+    a, b = 3203, 3204
+    await character.create(a, "meditating_attacker")
+    await character.create(b, "meditating_defender")
+    await db.execute("UPDATE characters SET seclusion_at=? WHERE user_id=?", (900, a))
+    await db.execute("UPDATE characters SET seclusion_at=? WHERE user_id=?", (901, b))
+
+    preview = await pvp.preview_duel(a, b)
+    res = await pvp.duel(a, b, now=1000)
+
+    assert preview["status"] == "ok"
+    assert res["status"] == "ok"
+    assert (await character.get(a)).seclusion_at == 900
+    assert (await character.get(b)).seclusion_at == 901
+
+
+@pytest.mark.asyncio
 async def test_pvp_weekly_pool_settles_by_rank_and_resets(temp_db):
     a, b = 3211, 3212
     await character.create(a, "champ")

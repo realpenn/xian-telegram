@@ -83,19 +83,19 @@ async def random_opponent(user_id: int):
         "SELECT rating FROM pvp_ratings WHERE user_id=?", (user_id,))
     rating = my_rating["rating"] if my_rating else 1000
     rows = await db.fetchall(
-        "SELECT c.user_id, c.realm, c.seclusion_at, COALESCE(p.rating, 1000) AS rating "
+        "SELECT c.user_id, c.realm, COALESCE(p.rating, 1000) AS rating "
         "FROM characters c LEFT JOIN pvp_ratings p ON p.user_id=c.user_id "
         "WHERE c.user_id<>?",
         (user_id,))
     eligible = [
         row for row in rows
-        if not row["seclusion_at"] and abs(row["realm"] - me.realm) <= 1
+        if abs(row["realm"] - me.realm) <= 1
     ]
     close = [row for row in eligible if abs(row["rating"] - rating) <= 200]
     if close:
         eligible = close
     if not eligible:
-        eligible = [row for row in rows if not row["seclusion_at"]]
+        eligible = rows
     return random.choice(eligible)["user_id"] if eligible else None
 
 
@@ -146,10 +146,6 @@ async def _validate_pair(attacker_id: int, defender_id: int = None) -> dict:
     defender = await character.get(defender_id)
     if not attacker or not defender:
         return {"status": "missing"}
-    if attacker.seclusion_at:
-        return {"status": "in_seclusion"}
-    if defender.seclusion_at:
-        return {"status": "opponent_busy"}
     if abs(attacker.realm - defender.realm) > 1:
         return {"status": "realm_gap"}
     return {"status": "ok", "defender_id": defender_id}

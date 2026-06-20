@@ -34,10 +34,6 @@ def _text(res: dict, opponent_name: str = "对手") -> str:
         return "暂未寻得合适对手。可让另一位道友先 /start。"
     if s == "daily_limit":
         return f"今日切磋已满 {res['limit']} 次。"
-    if s == "in_seclusion":
-        return "道友仍在闭关，不可切磋。"
-    if s == "opponent_busy":
-        return "对方闭关中，不便应战。"
     if s == "realm_gap":
         return "境界相差过大，此战不合天梯规矩。"
     if s == "missing":

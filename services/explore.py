@@ -401,6 +401,7 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
                    else [rng.choice(m["mobs"]) for _ in range(max(1, n_enc or 1))])
     logs = list(event_logs)
     win = True
+    defeat_reason = None
     for idx, mob_src in enumerate(mob_sources, 1):
         result = simulate(player, _combatant_from_mob(mob_src), seed=rng.randint(1, 10_000_000))
         logs.append(f"第 {idx} 战：遭遇 {mob_src['name']}")
@@ -408,6 +409,7 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
         logs.extend(shown[1:])
         if result["winner"] is not player:
             win = False
+            defeat_reason = result.get("reason")
             break
         player.hp = max(1, result["a_hp"])
 
@@ -457,6 +459,7 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
 
     return {"status": "ok", "map_key": map_key, "map": m["name"],
             "win": win, "is_boss": is_boss,
+            "defeat_reason": defeat_reason,
             "mob": "、".join(src["name"] for src in mob_sources),
             "log": logs, "reward": reward, "stamina_left": char.stamina,
             # 战斗快照（出发→战斗末，解释胜负）与领取后当前状态（落库）分开展示（#24 P2）。

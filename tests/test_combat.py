@@ -1,4 +1,4 @@
-from services.combat import Combatant, simulate
+from services.combat import MAX_ROUNDS, Combatant, round_limit_label, simulate
 
 
 def _mk(name, hp=1000, atk=100, df=50, spd=30, crit=10, mp=100, skills=None, **mods):
@@ -29,8 +29,10 @@ def test_rounds_capped_and_resolved():
     a = _mk("甲", hp=100000, atk=1, df=10000)
     b = _mk("乙", hp=100000, atk=1, df=10000, spd=10)
     r = simulate(a, b, seed=3)
-    assert r["rounds"] <= 30
+    assert r["rounds"] <= MAX_ROUNDS
     assert r["winner"] in (a, b)
+    assert r["reason"] == "round_limit"
+    assert round_limit_label() in r["log"][-1]
 
 
 def test_skill_used_when_affordable():

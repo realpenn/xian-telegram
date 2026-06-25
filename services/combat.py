@@ -1,7 +1,7 @@
 """即时自动战斗引擎（spec §7）。确定性带种子模拟，PvE/PvP 共用。
 
 伤害 = max(1, 攻 × 功法系数 × [1 − 防/(防+300)]) × 暴击 × rand(0.9,1.1)
-暴击率 = 暴/(暴+200)（上限 50%），暴击 ×1.5；每回合回法力 5%；最多 30 回合。
+暴击率 = 暴/(暴+200)（上限 50%），暴击 ×1.5；每回合回法力 5%；最多 MAX_ROUNDS 回合。
 """
 from __future__ import annotations
 
@@ -151,6 +151,24 @@ def _decide(a, d):
     return a if (a.hp / a.max_hp) >= (d.hp / d.max_hp) else d
 
 
+def round_limit_label() -> str:
+    return f"{MAX_ROUNDS} 回合"
+
+
+def _finish_reason(a, d):
+    if a.hp <= 0 and d.hp <= 0:
+        return "double_down"
+    if a.hp <= 0 or d.hp <= 0:
+        return "defeat"
+    return "round_limit"
+
+
+def _winner_line(winner, reason):
+    if reason == "round_limit":
+        return f"🏆 {winner.name} 胜！（{round_limit_label()}未分胜负，按剩余气血比例判定）"
+    return f"🏆 {winner.name} 胜！"
+
+
 def simulate(a: Combatant, d: Combatant, seed: int = 0) -> dict:
     rng = random.Random(seed)
     log = [f"⚔️ {a.name} 对阵 {d.name}！"]
@@ -174,6 +192,7 @@ def simulate(a: Combatant, d: Combatant, seed: int = 0) -> dict:
         if a.hp <= 0 or d.hp <= 0:
             break
     winner = _decide(a, d)
-    log.append(f"🏆 {winner.name} 胜！")
+    reason = _finish_reason(a, d)
+    log.append(_winner_line(winner, reason))
     return {"winner": winner, "log": log, "a_hp": max(0, a.hp),
-            "d_hp": max(0, d.hp), "rounds": rnd}
+            "d_hp": max(0, d.hp), "rounds": rnd, "reason": reason}

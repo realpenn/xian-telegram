@@ -14,6 +14,7 @@ from handlers.common import (NEED_START, guard_private_callback, guard_private_m
                              main_menu, show, vitals_line)
 from services import character
 from services import explore as explore_service
+from services.combat import round_limit_label
 
 router = Router()
 
@@ -155,6 +156,9 @@ def _result_text(res: dict) -> str:
         if rw["drops"]:
             parts.append("、".join(f"{item_name(k)}×{v}" for k, v in rw["drops"].items()))
         lines.append("🎁 战利品：" + "，".join(parts))
+    elif res.get("defeat_reason") == "round_limit":
+        lines.append(
+            f"久战 {round_limit_label()}未决，按剩余气血比例判负，重伤而归（修为、装备无损，养息后再来）。")
     else:
         lines.append("道友力竭，重伤而归（修为、装备无损，养息后再来）。")
     lines += battle_vitals_lines(res)

@@ -163,6 +163,37 @@ def test_low_mp_warning_and_starved_note():
     assert common.mp_starved_note({"max_mp": 100, "battle_mp_before": 90, "battle_mp_after": 90}) == ""
 
 
+def test_explore_timeout_loss_text_explains_remaining_hp():
+    from handlers import explore as explore_handler
+    from services.combat import round_limit_label
+
+    text = explore_handler._result_text({
+        "status": "ok",
+        "map_key": "后山",
+        "map": "青牛后山",
+        "win": False,
+        "is_boss": False,
+        "defeat_reason": "round_limit",
+        "log": [
+            "第 1 战：遭遇 天魔残兵",
+            f"🏆 天魔残兵 胜！（{round_limit_label()}未分胜负，按剩余气血比例判定）",
+        ],
+        "reward": {"stone": 0, "cult": 0, "drops": {}},
+        "stamina_left": 100,
+        "battle_hp_before": 7879,
+        "battle_hp_after": 4678,
+        "battle_mp_before": 911,
+        "battle_mp_after": 911,
+        "hp_after": 4827,
+        "mp_after": 911,
+        "max_hp": 7879,
+        "max_mp": 911,
+    })
+
+    assert f"久战 {round_limit_label()}未决" in text
+    assert "气血 7879→4678/7879" in text
+
+
 # ---- P2：结算区分「本场战斗快照」与「领取后当前状态」 ----
 
 @pytest.mark.asyncio

@@ -192,11 +192,13 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
                        skills=skills or ["普攻"], **mods)
     logs = []
     cleared = 0
+    defeat_reason = None
     for layer in range(1, d["layers"] + 1):
         mob_src = d["boss"] if layer == d["layers"] else rng.choice(d["mobs"])
         result = simulate(player, _combatant(mob_src), seed=rng.randint(1, 10_000_000))
         logs.append(f"第 {layer} 层：{mob_src['name']}，{'胜' if result['winner'] is player else '败'}")
         if result["winner"] is not player:
+            defeat_reason = result.get("reason")
             break
         cleared += 1
         player.hp = max(1, result["a_hp"])
@@ -244,7 +246,7 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
 
     return {"status": "ok", "dungeon_key": dungeon_key, "dungeon": d["name"],
             "cleared": cleared, "layers": d["layers"],
-            "win": cleared == d["layers"], "log": logs,
+            "win": cleared == d["layers"], "defeat_reason": defeat_reason, "log": logs,
             "reward": {"stone": stone, "cult": cult, "drops": stack_drops,
                        "equipment": equipment_drops},
             "stamina_left": char.stamina,

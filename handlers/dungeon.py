@@ -11,6 +11,7 @@ from handlers.common import (NEED_START, action_callback_data, battle_vitals_lin
                              consume_action_callback, guard_private_callback,
                              guard_private_message, main_menu, show, vitals_line)
 from services import character, dungeon
+from services.combat import round_limit_label
 
 router = Router()
 
@@ -98,6 +99,8 @@ def _result_text(res: dict) -> str:
     body = [f"🏯 {res['dungeon']}：深入 {res['cleared']}/{res['layers']} 层。", *res["log"]]
     if res["cleared"]:
         body.append("🎁 收获：" + "，".join(parts))
+    elif res.get("defeat_reason") == "round_limit":
+        body.append(f"首层久战 {round_limit_label()}未决，按剩余气血比例判负，重伤而归（修为、装备无损）。")
     else:
         body.append("首层即力竭，重伤而归（修为、装备无损）。")
     body += battle_vitals_lines(res)

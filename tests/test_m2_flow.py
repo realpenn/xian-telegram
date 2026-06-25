@@ -3,6 +3,8 @@ import pytest_asyncio
 
 from config import realms as R
 from config.dungeons import DUNGEONS
+from config.recipes import RECIPES
+from handlers import craft as craft_handler
 from models import db
 from services import character, crafting, dungeon, shop
 
@@ -28,7 +30,8 @@ async def test_crafting_collects_stack_item(temp_db):
     assert res["status"] == "started"
     assert await character.item_qty(uid, "疗伤丹") == 0
 
-    collected = await crafting.collect_ready(uid, now=1100)
+    assert await crafting.collect_ready(uid, now=res["finish_at"] - 1) == []
+    collected = await crafting.collect_ready(uid, now=res["finish_at"])
     assert collected == [{"kind": "item", "name": "疗伤丹", "qty": 1}]
     assert await character.item_qty(uid, "疗伤丹") == 1
 
@@ -43,13 +46,76 @@ async def test_forge_equipment_can_be_equipped_and_changes_stats(temp_db):
     await character.add_item(uid, "兽皮", 2)
 
     before = await character.stats(await character.get(uid))
-    assert (await crafting.start_job(uid, "forge_sword", now=1000))["status"] == "started"
-    await crafting.collect_ready(uid, now=1100)
+    started = await crafting.start_job(uid, "forge_sword", now=1000)
+    assert started["status"] == "started"
+    await crafting.collect_ready(uid, now=started["finish_at"])
     inst = (await character.item_instances(uid))[0]
 
     assert (await character.equip_instance(uid, inst["id"]))["status"] == "ok"
     after = await character.stats(await character.get(uid))
     assert after["atk"] > before["atk"]
+
+
+@pytest.mark.asyncio
+async def test_crafting_accelerate_cost_scales_with_remaining_minutes_and_shortens_activity(temp_db):
+    uid = 2018
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_stone(uid, 1000)
+    await character.add_item(uid, "灵草", 5)
+    await character.add_item(uid, "妖丹", 2)
+
+    started = await crafting.start_job(uid, "foundation_pill", now=1000)
+    res = await crafting.accelerate(uid, now=1000)
+    expected_cost = crafting.accelerate_cost(RECIPES["foundation_pill"]["seconds"])
+    window = await db.fetchone(
+        "SELECT start_at, finish_at FROM activity_windows "
+        "WHERE user_id=? AND kind='craft'",
+        (uid,))
+
+    assert started["status"] == "started"
+    assert expected_cost == 40
+    assert res["status"] == "accelerated"
+    assert res["cost"] == expected_cost
+    assert res["collected"] == [{"kind": "item", "name": "筑基丹", "qty": 1}]
+    assert await crafting.active_job(uid) is None
+    assert (window["start_at"], window["finish_at"]) == (1000, 1000)
+
+
+@pytest.mark.asyncio
+async def test_crafting_accelerate_ready_job_collects_without_cost(temp_db):
+    uid = 2019
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_stone(uid, RECIPES["heal_pill"]["stone"])
+    await character.add_item(uid, "灵草", 3)
+
+    started = await crafting.start_job(uid, "heal_pill", now=1000)
+    after_start = (await character.get(uid)).spirit_stone
+    res = await crafting.accelerate(uid, now=started["finish_at"])
+
+    assert res["status"] == "accelerated"
+    assert res["cost"] == 0
+    assert res["collected"] == [{"kind": "item", "name": "疗伤丹", "qty": 1}]
+    assert await character.item_qty(uid, "疗伤丹") == 1
+    assert (await character.get(uid)).spirit_stone == after_start
+
+
+@pytest.mark.asyncio
+async def test_craft_view_uses_service_accelerate_cost(temp_db, monkeypatch):
+    uid = 2021
+    await character.create(uid, "tester")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_stone(uid, 1000)
+    await character.add_item(uid, "灵草", 5)
+    await character.add_item(uid, "妖丹", 2)
+    await crafting.start_job(uid, "foundation_pill")
+    monkeypatch.setattr(crafting, "accelerate_cost", lambda _remaining: 123)
+
+    _text, markup = await craft_handler.render_craft(uid)
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+
+    assert "🪙 灵石加速（123）" in labels
 
 
 @pytest.mark.asyncio

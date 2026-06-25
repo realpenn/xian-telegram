@@ -31,6 +31,58 @@ def test_seclusion_stage_seconds_increases_with_realm():
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
+def test_alchemy_craft_seconds_make_acceleration_meaningful():
+    """丹药炼制进入分钟级阶梯,让灵石加速不再被 1 分钟封顶吞掉。"""
+    from config.recipes import RECIPES
+    from services.dungeon import DUNGEON_DURATION_SECONDS
+    from services import crafting
+
+    expected = {
+        "heal_pill": 3 * 60,
+        "stamina_pill": 4 * 60,
+        "might_pill": 5 * 60,
+        "focus_pill": 5 * 60,
+        "foundation_pill": 8 * 60,
+        "restore_pill": 12 * 60,
+        "marrow_pill": 15 * 60,
+    }
+    full_accelerate_costs = {key: crafting.accelerate_cost(seconds) for key, seconds in expected.items()}
+
+    assert {key: RECIPES[key]["seconds"] for key in expected} == expected
+    assert full_accelerate_costs == {
+        "heal_pill": 15,
+        "stamina_pill": 20,
+        "might_pill": 25,
+        "focus_pill": 25,
+        "foundation_pill": 40,
+        "restore_pill": 60,
+        "marrow_pill": 75,
+    }
+    assert max(expected.values()) < DUNGEON_DURATION_SECONDS
+
+
+def test_forge_craft_seconds_make_acceleration_meaningful():
+    """炼器产出是长线装备来源,时长略重于同阶常用丹药。"""
+    from config.recipes import RECIPES
+    from services.dungeon import DUNGEON_DURATION_SECONDS
+    from services import crafting
+
+    expected = {
+        "forge_sword": 8 * 60,
+        "forge_armor": 10 * 60,
+        "forge_accessory": 18 * 60,
+    }
+    full_accelerate_costs = {key: crafting.accelerate_cost(seconds) for key, seconds in expected.items()}
+
+    assert {key: RECIPES[key]["seconds"] for key in expected} == expected
+    assert full_accelerate_costs == {
+        "forge_sword": 40,
+        "forge_armor": 50,
+        "forge_accessory": 90,
+    }
+    assert max(expected.values()) < DUNGEON_DURATION_SECONDS
+
+
 # ---- 刚突破即可参与新图普通内容(#15-2/3,核心验收) ----
 
 def test_entry_small_mobs_are_farmable():

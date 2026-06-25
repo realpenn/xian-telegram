@@ -27,6 +27,14 @@ def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
     return affixes
 
 
+def accelerate_cost(remaining_seconds: int) -> int:
+    """按剩余分钟计加速费；已完成的任务免费收取。"""
+    remaining = max(0, int(remaining_seconds))
+    if remaining <= 0:
+        return 0
+    return ((remaining + 59) // 60) * ACCELERATE_STONE_PER_MINUTE
+
+
 async def active_job(user_id: int):
     return await db.fetchone(
         "SELECT * FROM crafting_jobs WHERE user_id=? AND status='active' ORDER BY id LIMIT 1",
@@ -161,15 +169,21 @@ async def accelerate(user_id: int, now: int = None) -> dict:
         await cur.close()
         if not job:
             return {"status": "no_job"}
-        remaining = max(0, job["finish_at"] - now)
-        cost = max(1, (remaining + 59) // 60) * ACCELERATE_STONE_PER_MINUTE
-        cur = await conn.execute("SELECT spirit_stone FROM characters WHERE user_id=?", (user_id,))
-        char = await cur.fetchone()
-        await cur.close()
-        if char["spirit_stone"] < cost:
-            return {"status": "no_stone", "need": cost, "have": char["spirit_stone"]}
-        await conn.execute(
-            "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
-            (cost, user_id))
-        await conn.execute("UPDATE crafting_jobs SET finish_at=? WHERE id=?", (now, job["id"]))
+        remaining = job["finish_at"] - now
+        cost = accelerate_cost(remaining)
+        if cost > 0:
+            cur = await conn.execute("SELECT spirit_stone FROM characters WHERE user_id=?", (user_id,))
+            char = await cur.fetchone()
+            await cur.close()
+            if char["spirit_stone"] < cost:
+                return {"status": "no_stone", "need": cost, "have": char["spirit_stone"]}
+            await conn.execute(
+                "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
+                (cost, user_id))
+            await conn.execute("UPDATE crafting_jobs SET finish_at=? WHERE id=?", (now, job["id"]))
+            await conn.execute(
+                "UPDATE activity_windows SET finish_at=? "
+                "WHERE user_id=? AND kind='craft' AND source_key=? "
+                "AND start_at=? AND finish_at=?",
+                (now, user_id, job["recipe_key"], job["start_at"], job["finish_at"]))
     return {"status": "accelerated", "cost": cost, "collected": await collect_ready(user_id, now)}

@@ -16,6 +16,17 @@ from services import character, crafting
 router = Router()
 
 
+def _duration(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds} 秒"
+    minutes = (seconds + 59) // 60
+    if minutes < 60:
+        return f"{minutes} 分钟"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} 小时 {rest} 分钟" if rest else f"{hours} 小时"
+
+
 async def render_craft(user_id: int):
     char = await character.get(user_id)
     if not char:
@@ -30,9 +41,9 @@ async def render_craft(user_id: int):
     if active:
         recipe = RECIPES[active["recipe_key"]]
         remain = max(0, active["finish_at"] - int(time.time()))
-        lines.append(f"炉中：{recipe['name']}，尚需 {remain} 秒。")
+        lines.append(f"炉中：{recipe['name']}，尚需 {_duration(remain)}。")
         rows.append([InlineKeyboardButton(
-            text="🪙 灵石加速",
+            text=f"🪙 灵石加速（{crafting.accelerate_cost(remain)}）",
             callback_data=await action_callback_data(user_id, "craft:fast"))])
     else:
         lines.append("选择一张丹方或图纸下炉：")
@@ -48,7 +59,7 @@ async def render_craft(user_id: int):
 def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "started":
-        return f"炉火已起，开始炼制「{res['name']}」，约 {res['seconds']} 秒后出炉。"
+        return f"炉火已起，开始炼制「{res['name']}」，约 {_duration(res['seconds'])} 后出炉。"
     if s == "busy":
         return "炉中已有造化，且待出炉。"
     if s == "locked":
@@ -63,6 +74,8 @@ def _result_text(res: dict) -> str:
         return f"材料不足：{item_name(res['item'])} 需 {res['need']}，现有 {res['have']}。"
     if s == "accelerated":
         names = "、".join(c["name"] for c in res["collected"]) or "炉火已催至将成"
+        if res.get("cost", 0) <= 0:
+            return f"炉火已成，{names}。"
         return f"消耗灵石 {res['cost']} 加速，{names}。"
     if s == "no_job":
         return "炉中空空，尚无可加速之物。"

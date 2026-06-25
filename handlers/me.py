@@ -21,13 +21,15 @@ async def render_me(user_id: int):
     char = await character.get(user_id)
     if not char:
         return NEED_START, None
-    st = await character.stats(char)
-    v = await character.vitals(char)
+    equipped = await character.equipped_items(user_id)
+    st = await character.stats(char, equipped=equipped)
+    v = await character.vitals(char, stat_block=st)
     cost = R.advance_cost(char.realm, char.stage)
     welfare = await character.sect_welfare(user_id)
     cap = R.STAMINA_CAP[char.realm] + welfare["stamina_bonus"]
     mind = await character.get_mind_skill(user_id)
     skills = await character.get_skills(user_id)
+    weapon_key = character.current_weapon_key(char, equipped)
     seclusion = "（闭关中 🧘）" if char.seclusion_at else ""
     lines = [
         f"📜 {char.spirit_root} · 根骨 {char.root_bone}",
@@ -37,7 +39,7 @@ async def render_me(user_id: int):
         "—— 法身六维 ——",
         f"气血 {v['hp']}/{v['max_hp']}　法力 {v['mp']}/{v['max_mp']}",
         f"攻击 {st['atk']}　防御 {st['df']}　身法 {st['spd']}　暴击 {st['crit']}",
-        f"⚔️ 法宝：{item_name(char.weapon_key)}",
+        f"⚔️ 法宝：{item_name(weapon_key)}",
         "📖 心法：" + (skill_name(mind) if mind else "无"),
         "📖 战技：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
     ]

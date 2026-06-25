@@ -237,15 +237,13 @@ async def get_at(user_id: int, now: int = None):
     return _from_row(row, new_stam, new_at)
 
 
-async def stats(char: Character) -> dict:
+async def stats(char: Character, equipped: list[dict] = None) -> dict:
     base = R.base_stats(char.realm, char.stage)
-    equipped = await equipped_items(char.user_id)
+    equipped = await equipped_items(char.user_id) if equipped is None else equipped
     if equipped:
-        has_weapon = False
         for inst in equipped:
-            has_weapon = has_weapon or equipment_slot(inst["base_key"]) == "weapon"
             _apply_equipment_bonus(base, equipment_bonus(inst), inst.get("enhance_level", 0))
-        if not has_weapon:
+        if not equipped_weapon_key(equipped):
             for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
     else:
@@ -285,13 +283,13 @@ def settled_vitals(char: Character, max_hp: int, max_mp: int, now: int) -> tuple
     return new_hp, new_hp_at, new_mp, new_mp_at
 
 
-async def vitals(char: Character, now: int = None) -> dict:
+async def vitals(char: Character, now: int = None, stat_block: dict = None) -> dict:
     """当前/最大 气血法力，并把结算后的当前值惰性落库（仿 get_at 的精力落库）。
 
     返回 {"hp", "max_hp", "mp", "max_mp"}。供 /me、历练/秘境菜单使用（非写事务路径）。
     """
     now = int(time.time()) if now is None else now
-    st = await stats(char)
+    st = stat_block if stat_block is not None else await stats(char)
     max_hp, max_mp = st["hp"], st["mp"]
     hp, hp_at, mp, mp_at = settled_vitals(char, max_hp, max_mp, now)
     if (hp != char.current_hp or mp != char.current_mp
@@ -403,6 +401,17 @@ async def equipped_items(user_id: int):
         "SELECT * FROM item_instances WHERE user_id=? AND equipped_slot IS NOT NULL ORDER BY id",
         (user_id,))
     return [_instance_from_row(row) for row in rows]
+
+
+def equipped_weapon_key(equipped: list[dict]) -> str | None:
+    for inst in equipped:
+        if equipment_slot(inst["base_key"]) == "weapon":
+            return inst["base_key"]
+    return None
+
+
+def current_weapon_key(char: Character, equipped: list[dict]) -> str:
+    return equipped_weapon_key(equipped) or char.weapon_key
 
 
 def _instance_from_row(row) -> dict:

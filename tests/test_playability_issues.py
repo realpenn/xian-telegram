@@ -112,6 +112,42 @@ async def test_achievements_are_visible_on_me_panel(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_me_panel_uses_equipped_weapon_instance(temp_db):
+    from handlers import me as me_handler
+
+    uid = 8007
+    await character.create(uid, "bluepants")
+    await character.create_item_instance(uid, "玄铁剑")
+    inst = (await character.item_instances(uid))[0]
+
+    assert (await character.equip_instance(uid, inst["id"]))["status"] == "ok"
+    assert (await character.get(uid)).weapon_key == "新手剑"
+
+    text, _ = await me_handler.render_me(uid)
+
+    assert "⚔️ 法宝：玄铁剑" in text
+    assert "⚔️ 法宝：新手木剑" not in text
+
+
+@pytest.mark.asyncio
+async def test_me_panel_uses_same_weapon_predicate_as_stats(temp_db):
+    from handlers import me as me_handler
+
+    uid = 8008
+    await character.create(uid, "drifter")
+    await character.create_item_instance(uid, "玄铁剑")
+    inst = (await character.item_instances(uid))[0]
+    await db.execute(
+        "UPDATE item_instances SET equipped_slot='armor' WHERE id=?",
+        (inst["id"],))
+
+    text, _ = await me_handler.render_me(uid)
+
+    assert "⚔️ 法宝：玄铁剑" in text
+    assert "⚔️ 法宝：新手木剑" not in text
+
+
+@pytest.mark.asyncio
 async def test_social_broadcasts_and_rank_notifications_are_queued_and_flushed(temp_db):
     class FakeBot:
         def __init__(self):

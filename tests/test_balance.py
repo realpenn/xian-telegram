@@ -184,6 +184,20 @@ def test_hard_maps_riskier_than_easy_at_entry():
         assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
 
+def test_yuanying_mid_mobs_do_not_depend_on_round_limit():
+    """元婴中期刷普通怪应主要靠击杀结算,而不是反复拖到 30 回合判定。"""
+    from config.maps import MAPS
+    from services.combat import simulate
+
+    for map_key in TIERS[3]:
+        for mob in MAPS[map_key]["mobs"]:
+            timeouts = 0
+            for seed in range(80):
+                res = simulate(B.player(3, 1), B._mob(mob), seed=seed)
+                timeouts += res["reason"] == "round_limit"
+            assert timeouts == 0, f"{mob['name']} 仍有 {timeouts}/80 场拖到回合上限"
+
+
 # ---- 经济:买精力不能成为刷钱燃料(#16) ----
 
 def test_buy_stamina_costlier_than_best_content_yield():

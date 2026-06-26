@@ -42,6 +42,52 @@ def _scaled_total_hp(cfg: dict, cultivator_count: int) -> int:
     return max(1, int(round(cfg["total_hp"] * scale)))
 
 
+def _special_reward_slots(participant_count: int) -> int:
+    """多人小群至少给前 2 名特殊奖励；大群维持约前三分之一。"""
+    if participant_count <= 1:
+        return max(0, participant_count)
+    return min(participant_count, max(2, participant_count // 3))
+
+
+def _legacy_reward_slots(participant_count: int) -> int:
+    return max(1, participant_count // 3)
+
+
+def _drop_qty_for_rank(total: int, rank_index: int, slots: int, legacy_slots: int) -> int:
+    if total <= 0 or rank_index >= slots:
+        return 0
+    if total < slots:
+        return 1 if rank_index < total else 0
+    if slots > legacy_slots:
+        base = total // slots
+        extra = total % slots
+        return base + (1 if rank_index < extra else 0)
+    return total // slots
+
+
+def _split_drops_for_rank(drops: dict, rank_index: int, slots: int,
+                          participant_count: int) -> dict:
+    if rank_index >= slots:
+        return {}
+    legacy_slots = _legacy_reward_slots(participant_count)
+    bundle = {}
+    for key, total in drops.items():
+        qty = _drop_qty_for_rank(int(total), rank_index, slots, legacy_slots)
+        if qty > 0:
+            bundle[key] = qty
+    return bundle
+
+
+def _ranked_bonus_shares(total: int, slots: int) -> list[int]:
+    if slots <= 0 or total <= 0:
+        return []
+    weights = [slots - idx for idx in range(slots)]
+    wsum = sum(weights)
+    shares = [int(total * weight / wsum) for weight in weights]
+    shares[0] += total - sum(shares)
+    return shares
+
+
 async def remember_cultivator(chat_id: int, user_id: int, now: int = None) -> bool:
     """记录本群已知修仙者；只有已创建角色的用户会计入 Boss 缩放。"""
     now = int(time.time()) if now is None else now
@@ -293,7 +339,7 @@ async def challenge(chat_id: int, user_id: int, now: int = None) -> dict:
 
 
 async def _distribute(conn, boss_id: int, cfg: dict):
-    """参与奖 + 软化分层贡献奖 + 榜首小额额外奖；稀有掉落分摊给前列而非独归榜首（#14）。"""
+    """参与奖 + 软化分层贡献奖；小群特殊掉落至少覆盖前 2 名。"""
     cur = await conn.execute(
         "SELECT user_id, damage FROM world_boss_damage WHERE boss_id=? ORDER BY damage DESC",
         (boss_id,))
@@ -309,18 +355,18 @@ async def _distribute(conn, boss_id: int, cfg: dict):
     # 贡献奖：按伤害平方根加权，压缩头尾差距，抑制强者滚雪球。
     weights = [math.sqrt(max(1, row["damage"])) for row in rows]
     wsum = sum(weights) or 1.0
-    # 稀有掉落分摊给前 1/3，避免稀有奖励只集中在榜首。
-    top_k = max(1, n // 3)
-    drops_each = {k: max(1, v // top_k) for k, v in cfg["drops"].items()}
+    # 稀有掉落分摊给前列；多人小群至少覆盖前 2 名，避免奖励独归榜首。
+    special_slots = _special_reward_slots(n)
+    bonus_shares = _ranked_bonus_shares(int(pool * 0.05), special_slots)
     rewards = []
     for idx, row in enumerate(rows):
         stone = participation + int(remaining * weights[idx] / wsum)
-        if idx == 0:
-            stone += int(pool * 0.05)  # 榜首小额额外奖（5%）。
+        if idx < len(bonus_shares):
+            stone += bonus_shares[idx]
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (stone, row["user_id"]))
-        drops = dict(drops_each) if idx < top_k else {}
+        drops = _split_drops_for_rank(cfg["drops"], idx, special_slots, n)
         for key, qty in drops.items():
             await conn.execute(
                 "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
@@ -334,7 +380,14 @@ async def _distribute(conn, boss_id: int, cfg: dict):
 def reward_text(rewards: list) -> str:
     if not rewards:
         return ""
-    top = rewards[0]
-    drops = "、".join(f"{item_name(k)}×{v}" for k, v in top["drops"].items())
     base = f"击杀奖励已结算，{len(rewards)} 位道友按贡献分润灵石"
-    return base + (f"，前列另得 {drops}。" if drops else "。")
+    drop_rows = [row for row in rewards if row["drops"]]
+    if not drop_rows:
+        return base + "。"
+    totals = {}
+    for row in drop_rows:
+        for key, qty in row["drops"].items():
+            totals[key] = totals.get(key, 0) + qty
+    drops = "、".join(f"{item_name(key)}×{qty}" for key, qty in totals.items())
+    prefix = "前列" if len(drop_rows) > 1 else "榜首"
+    return f"{base}，{prefix}另分 {drops}。"

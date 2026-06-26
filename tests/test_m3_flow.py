@@ -173,6 +173,61 @@ async def test_world_boss_challenge_defeats_and_rewards(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_world_boss_small_groups_share_special_drops(temp_db):
+    chat_id = -3300
+    uids = [330001, 330002, 330003]
+    for idx, uid in enumerate(uids, start=1):
+        await character.create(uid, f"boss{idx}")
+
+    boss = await world_boss.ensure_active(chat_id, now=1000)
+    for uid, damage in zip(uids, (300, 200, 100)):
+        await db.execute(
+            "INSERT INTO world_boss_damage(boss_id, user_id, damage) VALUES(?,?,?)",
+            (boss["id"], uid, damage))
+
+    res = await world_boss.status(chat_id, now=boss["expire_at"] + 1)
+
+    assert res["status"] == "expired"
+    assert await character.item_qty(uids[0], "金丹") > 0
+    assert await character.item_qty(uids[1], "金丹") > 0
+    assert await character.item_qty(uids[2], "金丹") == 0
+    for key, total in bosses.WORLD_BOSSES["zhuji"]["drops"].items():
+        assert sum([await character.item_qty(uid, key) for uid in uids]) == total
+
+
+@pytest.mark.asyncio
+async def test_world_boss_large_groups_do_not_inflate_configured_drops(temp_db):
+    chat_id = -3310
+    uids = [331000 + idx for idx in range(15)]
+    for idx, uid in enumerate(uids, start=1):
+        await character.create(uid, f"raid{idx}")
+
+    boss = await world_boss.ensure_active(chat_id, now=1000)
+    for idx, uid in enumerate(uids):
+        await db.execute(
+            "INSERT INTO world_boss_damage(boss_id, user_id, damage) VALUES(?,?,?)",
+            (boss["id"], uid, 1000 - idx))
+
+    res = await world_boss.status(chat_id, now=boss["expire_at"] + 1)
+
+    assert res["status"] == "expired"
+    slots = len(uids) // 3
+    for key, total in bosses.WORLD_BOSSES["zhuji"]["drops"].items():
+        expected = (total // slots) * slots if total >= slots else total
+        assert sum([await character.item_qty(uid, key) for uid in uids]) == expected
+
+
+def test_world_boss_reward_text_summarizes_drop_quantities():
+    text = world_boss.reward_text([
+        {"rank": 1, "user_id": 1, "stone": 100, "drops": {"妖丹": 2, "金丹": 1}},
+        {"rank": 2, "user_id": 2, "stone": 80, "drops": {"妖丹": 1}},
+        {"rank": 3, "user_id": 3, "stone": 50, "drops": {}},
+    ])
+
+    assert "前列另分 妖丹×3、金丹×1" in text
+
+
+@pytest.mark.asyncio
 async def test_world_boss_hp_scales_by_known_group_cultivators(temp_db):
     solo_chat = -3301
     solo_uid = 330101

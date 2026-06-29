@@ -97,3 +97,87 @@ async def test_talisman_path_improves_seclusion_gain(temp_db):
     without_path = await character.collect_seclusion(no_path_uid, now=4600)
 
     assert with_path["gained"] > without_path["gained"]
+
+
+@pytest.mark.asyncio
+async def test_rank_up_costs_daohang_materials_and_emits_event(temp_db):
+    uid = 9307
+    await character.create(uid, "ranker")
+    await character.set_progress(uid, 3, 0, 0)
+    await dao_path.unlock(uid, "sword", now=1000)
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?", (500, uid))
+
+    res = await dao_path.rank_up(uid, "sword", now=1100)
+    row = await db.fetchone("SELECT daohang FROM characters WHERE user_id=?", (uid,))
+    path = await dao_path.active_path(uid)
+    event = await db.fetchone(
+        "SELECT event_type, amount FROM path_events WHERE user_id=? AND event_type='rank_up'",
+        (uid,))
+
+    assert res["status"] == "ok"
+    assert path["rank"] == 1
+    assert row["daohang"] == 400
+    assert event["amount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_rank_up_requires_material_for_higher_rank(temp_db):
+    uid = 9308
+    await character.create(uid, "material")
+    await character.set_progress(uid, 3, 0, 0)
+    await dao_path.unlock(uid, "sword", now=1000)
+    await db.execute("UPDATE dao_paths SET rank=1 WHERE user_id=? AND path_key='sword'", (uid,))
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?", (1000, uid))
+
+    assert (await dao_path.rank_up(uid, "sword", now=1100))["status"] == "no_material"
+    await character.add_item(uid, "星陨砂", 1, bound=1)
+    res = await dao_path.rank_up(uid, "sword", now=1200)
+
+    assert res["status"] == "ok"
+    assert (await dao_path.active_path(uid))["rank"] == 2
+    assert await character.item_qty(uid, "星陨砂") == 0
+
+
+@pytest.mark.asyncio
+async def test_switch_path_consumes_bound_token_keeps_history_and_cools_down(temp_db):
+    uid = 9309
+    await character.create(uid, "switcher")
+    await character.set_progress(uid, 3, 0, 0)
+    await character.add_stone(uid, CFG.SWITCH_STONE_COST * 2)
+    await dao_path.unlock(uid, "sword", now=1000)
+    await db.execute("UPDATE dao_paths SET rank=2 WHERE user_id=? AND path_key='sword'", (uid,))
+    await character.add_item(uid, CFG.SWITCH_TOKEN, 1, bound=0)
+
+    assert (await dao_path.switch(uid, "body", now=2000))["status"] == "no_token"
+    await character.add_item(uid, CFG.SWITCH_TOKEN, 2, bound=1)
+    res = await dao_path.switch(uid, "body", now=2000)
+    active = await dao_path.active_path(uid)
+    paths = {row["path_key"]: row for row in await dao_path.list_paths(uid)}
+    cooldown = await dao_path.switch(uid, "sword", now=2001)
+
+    assert res["status"] == "ok"
+    assert active["path_key"] == "body"
+    assert paths["sword"]["rank"] == 2
+    assert paths["body"]["rank"] == 0
+    assert await character.item_qty(uid, CFG.SWITCH_TOKEN, bound=0) == 1
+    assert await character.item_qty(uid, CFG.SWITCH_TOKEN, bound=1) == 1
+    assert cooldown["status"] == "cooldown"
+
+
+@pytest.mark.asyncio
+async def test_switch_after_cooldown_reactivates_old_path_without_rank_loss(temp_db):
+    uid = 9310
+    await character.create(uid, "back")
+    await character.set_progress(uid, 3, 0, 0)
+    await character.add_stone(uid, CFG.SWITCH_STONE_COST * 3)
+    await dao_path.unlock(uid, "sword", now=1000)
+    await db.execute("UPDATE dao_paths SET rank=3 WHERE user_id=? AND path_key='sword'", (uid,))
+    await character.add_item(uid, CFG.SWITCH_TOKEN, 2, bound=1)
+    await dao_path.switch(uid, "body", now=2000)
+
+    res = await dao_path.switch(uid, "sword", now=2000 + CFG.SWITCH_COOLDOWN_SECONDS)
+    active = await dao_path.active_path(uid)
+
+    assert res["status"] == "ok"
+    assert active["path_key"] == "sword"
+    assert active["rank"] == 3

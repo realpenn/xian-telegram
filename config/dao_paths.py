@@ -4,6 +4,15 @@ from __future__ import annotations
 UNLOCK_REALM = 3
 
 RANK_NAMES = ["入门", "小成", "大成", "圆满", "宗师"]
+RANK_UP_COSTS = {
+    1: {"daohang": 100, "items": {}},
+    2: {"daohang": 300, "items": {"星陨砂": 1}},
+    3: {"daohang": 800, "items": {"幽都魂晶": 1}},
+    4: {"daohang": 1600, "items": {"天外残玉": 1}},
+}
+SWITCH_TOKEN = "转修令"
+SWITCH_STONE_COST = 2000
+SWITCH_COOLDOWN_SECONDS = 7 * 86400
 
 DAO_PATHS = {
     "sword": {

@@ -317,6 +317,17 @@ CREATE TABLE IF NOT EXISTS pvp_season_rewards (
     claimed_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, season)
 );
+CREATE TABLE IF NOT EXISTS market_listings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id   INTEGER NOT NULL,
+    item_key    TEXT NOT NULL,
+    qty         INTEGER NOT NULL,
+    price       INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',
+    buyer_id    INTEGER,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
 """
 
 

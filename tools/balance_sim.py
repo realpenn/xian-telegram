@@ -13,6 +13,8 @@ from __future__ import annotations
 import random
 
 from config import realms as R
+from config import buffs as BUFFS
+from config import dao_paths as DAO
 from config.bosses import WORLD_BOSSES
 from config.dungeons import DUNGEONS
 from config.items import ITEMS
@@ -24,6 +26,10 @@ from services.combat import Combatant, simulate
 GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
           "mind": "吐纳诀", "equip": ["玄铁剑", "青木甲", "聚灵佩"]}
 STARTER = {"skills": ["快剑斩", "普攻"], "mind": "吐纳诀", "equip": ["新手剑"]}
+DAO_MAX_PROFILES = {
+    key: {**GEARED, "dao_path": key, "dao_rank": len(DAO.RANK_NAMES) - 1}
+    for key in DAO.DAO_PATHS
+}
 
 # 每张图/秘境对应的"解锁境界"。
 CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3, "星陨海": 4}
@@ -31,17 +37,36 @@ CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场":
 
 def build_player_stats(realm: int, stage: int, profile=GEARED) -> dict:
     base = R.base_stats(realm, stage)
+    pct_bonus = {key: 0.0 for key in R.STAT_KEYS}
     for key in profile.get("equip", []):
         for k, v in ITEMS.get(key, {}).get("bonus", {}).items():
-            base[k] = base.get(k, 0) + v
+            if k.endswith("_pct"):
+                stat_key = k[:-4]
+                if stat_key in pct_bonus:
+                    pct_bonus[stat_key] += float(v)
+            else:
+                base[k] = base.get(k, 0) + v
     mind = SKILLS.get(profile.get("mind"))
     if mind:
         for k, v in mind.get("bonus", {}).items():
             if k.endswith("_pct"):
                 sk = k[:-4]
-                base[sk] = int(base.get(sk, 0) * (1 + v))
+                if sk in pct_bonus:
+                    pct_bonus[sk] += float(v)
             else:
                 base[k] = base.get(k, 0) + v
+    for k, v in DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0)).items():
+        if k.endswith("_pct"):
+            sk = k[:-4]
+            if sk in pct_bonus:
+                pct_bonus[sk] += float(v)
+        elif k in R.STAT_KEYS:
+            base[k] = base.get(k, 0) + int(v)
+    for k, pct in pct_bonus.items():
+        cap = BUFFS.ATTACK_PCT_CAP if k in BUFFS.ATTACK_STATS else BUFFS.SURVIVAL_PCT_CAP
+        applied = min(cap, max(0.0, pct))
+        if applied:
+            base[k] = int(base.get(k, 0) * (1 + applied))
     return base
 
 
@@ -134,6 +159,21 @@ def world_boss_kill_challenges(boss_key: str, realm: int, stage: int, n: int = 2
     """该档玩家击杀世界 Boss 所需的总挑战次数 = total_hp / 单次伤害。"""
     cfg = WORLD_BOSSES[boss_key]
     return cfg["total_hp"] / boss_damage_per_challenge(realm, stage, boss_key, n=n)
+
+
+def breakthrough_rate_with_profile(base_rate: float, profile=GEARED) -> float:
+    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    return min(0.95, base_rate + float(bonus.get("alchemy_pct", 0)))
+
+
+def forge_quality_score(profile=GEARED) -> float:
+    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    return 1.0 + float(bonus.get("forge_pct", 0))
+
+
+def seclusion_efficiency(profile=GEARED) -> float:
+    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    return 1.0 + min(BUFFS.SECLUSION_PCT_CAP, max(0.0, float(bonus.get("seclusion_pct", 0))))
 
 
 # ---- 经济:套利 ----

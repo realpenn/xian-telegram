@@ -47,12 +47,13 @@ async def test_shop_sell_only_uses_unbound_inventory(temp_db):
 
 
 @pytest.mark.asyncio
-async def test_breakthrough_consumes_bound_pill_before_unbound(temp_db):
+async def test_breakthrough_consumes_bound_pill_before_unbound(temp_db, monkeypatch):
     uid = 9103
     await character.create(uid, "advancer")
     await character.set_progress(uid, 0, R.num_stages(0) - 1, R.advance_cost(0, R.num_stages(0) - 1))
     await character.add_item(uid, "筑基丹", 1, bound=0)
     await character.add_item(uid, "筑基丹", 1, bound=1)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
 
     res = await breakthrough.try_advance(uid, now=1000)
 

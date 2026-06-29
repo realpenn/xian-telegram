@@ -271,6 +271,23 @@ CREATE TABLE IF NOT EXISTS callback_tokens (
     created_at   INTEGER NOT NULL,
     consumed_at  INTEGER
 );
+CREATE TABLE IF NOT EXISTS dao_paths (
+    user_id     INTEGER NOT NULL,
+    path_key    TEXT NOT NULL,
+    xp          INTEGER NOT NULL DEFAULT 0,
+    rank        INTEGER NOT NULL DEFAULT 0,
+    active      INTEGER NOT NULL DEFAULT 0,
+    unlocked_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, path_key)
+);
+CREATE TABLE IF NOT EXISTS path_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    path_key    TEXT,
+    event_type  TEXT NOT NULL,
+    amount      INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+);
 """
 
 

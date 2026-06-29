@@ -15,6 +15,7 @@ from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTE
                            is_mind_skill, skill_bonus)
 from models import db
 from services import activity, settle
+from services import dao_path
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
@@ -172,8 +173,11 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                 settle_start = last_seen + AUTO_SECLUSION_IDLE_SECONDS
                 welfare = await _sect_welfare(conn, user_id)
                 state = json.loads(row["debuff_json"] or "{}")
+                path_bonus = await dao_path.active_bonuses(user_id)
                 place_factor = 1 + clamp_seclusion_pct(
-                    welfare["seclusion_pct"] + raw_temporary_seclusion_pct(state, now))
+                    welfare["seclusion_pct"]
+                    + raw_temporary_seclusion_pct(state, now)
+                    + float(path_bonus.get("seclusion_pct", 0)))
                 windows = await activity.windows_for(user_id, settle_start, now, conn=conn)
                 auto_gain, remainder = settle.seclusion_gain_with_remainder(
                     row["realm"], row["stage"], settle_start, now,
@@ -266,6 +270,13 @@ async def stats(char: Character, equipped: list[dict] = None, pvp: bool = False)
                     pct_bonus[stat_key] += float(val)
             else:
                 base[key] = base.get(key, 0) + val
+    for key, val in (await dao_path.active_bonuses(char.user_id)).items():
+        if key.endswith("_pct"):
+            stat_key = key[:-4]
+            if stat_key in pct_bonus:
+                pct_bonus[stat_key] += float(val)
+        elif key in R.STAT_KEYS:
+            base[key] = base.get(key, 0) + int(val)
     _collect_temporary_stat_buffs(base, pct_bonus, char.debuff_json)
     welfare = await sect_welfare(char.user_id)
     if welfare["stat_pct"]:
@@ -742,8 +753,11 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         welfare = await _sect_welfare(conn, user_id)
         stamina, stamina_at = _settled_stamina(row, now, welfare)
         state = json.loads(row["debuff_json"] or "{}")
+        path_bonus = await dao_path.active_bonuses(user_id)
         place_factor = 1 + clamp_seclusion_pct(
-            welfare["seclusion_pct"] + raw_temporary_seclusion_pct(state, now))
+            welfare["seclusion_pct"]
+            + raw_temporary_seclusion_pct(state, now)
+            + float(path_bonus.get("seclusion_pct", 0)))
         cap_seconds = (settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"]) * 3600
         window_end = min(now, int(row["seclusion_at"]) + cap_seconds)
         windows = await activity.windows_for(user_id, row["seclusion_at"], window_end, conn=conn)

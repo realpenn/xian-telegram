@@ -64,3 +64,27 @@ TRIBULATION_ACTIONS = {
         "text": "不借外物，凝神硬抗雷劫。",
     },
 }
+
+SHENHUN_TRIBULATION_ACTIONS = {
+    "focus": {
+        "label": "凝神守一",
+        "shield": 220,
+        "heal_pct": 0.0,
+        "item": None,
+        "text": "凝神守一，紧闭识海，化去一缕心魔侵扰。",
+    },
+    "artifact": {
+        "label": "祭出护体法宝",
+        "shield": 300,
+        "heal_pct": 0.0,
+        "item": None,
+        "text": "祭出护体法宝，灵光护住神魂。",
+    },
+    "pill": {
+        "label": "服大还丹",
+        "shield": 80,
+        "heal_pct": 0.45,
+        "item": "大还丹",
+        "text": "服下一枚大还丹，药力稳住翻涌气血。",
+    },
+}

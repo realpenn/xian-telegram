@@ -26,7 +26,7 @@ GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
 STARTER = {"skills": ["快剑斩", "普攻"], "mind": "吐纳诀", "equip": ["新手剑"]}
 
 # 每张图/秘境对应的"解锁境界"。
-CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3}
+CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3, "星陨海": 4}
 
 
 def build_player_stats(realm: int, stage: int, profile=GEARED) -> dict:
@@ -169,7 +169,7 @@ def _bar(x: float) -> str:
 def report() -> None:
     print("=" * 78)
     print("玩家属性(满配无词条)  hp/atk/df/spd/crit")
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         for stage in (0, R.num_stages(r) - 1):
             st = build_player_stats(r, stage, GEARED)
             print(f"  {R.realm_label(r, stage):<12} "
@@ -206,7 +206,7 @@ def report() -> None:
     print("=" * 78)
     print("经济套利:  首买精力成本/精力  vs  最佳内容产出/精力   (成本>产出 即套利已堵)")
     from services import shop
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         best = best_content_stone_per_stamina(r)
         cost_per = shop.first_buy_cost_per_stamina(r) if hasattr(
             shop, "first_buy_cost_per_stamina") else (

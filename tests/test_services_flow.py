@@ -119,6 +119,48 @@ def test_big_breakthrough_pills_drop_before_target_realm():
             m["realm"] < target_realm and any(drop[0] == pill for drop in m["drops"])
             for m in MAPS.values()
         ), f"{pill} must drop before realm {target_realm}"
+def test_huashen_pill_chain_uses_yuanying_hard_map():
+    drops = {drop[0] for drop in MAPS["天魔古原"]["drops"]}
+    assert MAPS["天魔古原"]["realm"] == 3
+    assert {"化神丹残方", "化神丹"} <= drops
+
+
+@pytest.mark.asyncio
+async def test_yuanying_to_huashen_needs_pill_and_uses_shenhun_choices(temp_db, monkeypatch):
+    uid = 1004
+    await character.create(uid, "tester")
+    last_yy = R.num_stages(3) - 1
+    cost = R.advance_cost(3, last_yy)
+    await character.set_progress(uid, 3, last_yy, cost)
+
+    assert await breakthrough.try_advance(uid, now=1000) == {"status": "need_pill", "pill": "化神丹"}
+
+    await character.add_item(uid, "化神丹", 1)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
+    monkeypatch.setattr(breakthrough.random, "randint", lambda _a, _b: 1)
+
+    res = await breakthrough.try_advance(uid, now=1000)
+
+    assert res["status"] == "tribulation_choice"
+    assert [choice["key"] for choice in res["choices"]] == ["focus", "artifact", "pill"]
+    assert [choice["label"] for choice in res["choices"]] == ["凝神守一", "祭出护体法宝", "服大还丹"]
+
+    res = await breakthrough.choose_tribulation_action(uid, "focus", now=1001)
+    assert "神魂劫" in "".join(res["last_log"])
+    assert await character.item_qty(uid, "化神丹") == 0
+
+
+@pytest.mark.asyncio
+async def test_huashen_tribulation_rejects_old_lightning_choice(temp_db, monkeypatch):
+    uid = 1005
+    await character.create(uid, "tester")
+    last_yy = R.num_stages(3) - 1
+    await character.set_progress(uid, 3, last_yy, R.advance_cost(3, last_yy))
+    await character.add_item(uid, "化神丹", 1)
+    monkeypatch.setattr(breakthrough.random, "random", lambda: 0.0)
+
+    assert (await breakthrough.try_advance(uid, now=1000))["status"] == "tribulation_choice"
+    assert (await breakthrough.choose_tribulation_action(uid, "endure", now=1001))["status"] == "bad_action"
 
 
 @pytest.mark.asyncio

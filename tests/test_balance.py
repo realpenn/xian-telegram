@@ -11,7 +11,7 @@
 from config import realms as R
 from tools import balance_sim as B
 
-MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场"}   # 各境界「易」档(向后兼容旧断言)
+MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海"}   # 各境界「易」档(向后兼容旧断言)
 DGN_OF = {1: "xuanming", 2: "qingyun", 3: "tianxu"}
 
 # 各大境界 (易, 中, 难) 三档地图(#20)。
@@ -20,14 +20,15 @@ TIERS = {
     1: ("妖兽森林", "赤霞岩谷", "枯骨沼泽"),
     2: ("万妖岭", "碧毒蛟潭", "九霄雷泽"),
     3: ("上古战场", "归墟裂谷", "天魔古原"),
+    4: ("星陨海", "幽都裂隙", "天外古墟"),
 }
 
 
 # ---- 闭关按境界配时长(#15-1) ----
 
 def test_seclusion_stage_seconds_increases_with_realm():
-    secs = [R.seclusion_stage_seconds(r) for r in range(4)]
-    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600]
+    secs = [R.seclusion_stage_seconds(r) for r in range(len(R.REALM_NAMES))]
+    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600]
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
@@ -86,7 +87,7 @@ def test_forge_craft_seconds_make_acceleration_meaningful():
 # ---- 刚突破即可参与新图普通内容(#15-2/3,核心验收) ----
 
 def test_entry_small_mobs_are_farmable():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         mob, _ = B.map_winrates(r, 0, MAP_OF[r])
         assert mob >= 0.99, f"r{r} 刚解锁小怪单场胜率过低: {mob:.2f}"
         run = B.map_run_winrate(r, 0, MAP_OF[r])
@@ -94,7 +95,7 @@ def test_entry_small_mobs_are_farmable():
 
 
 def test_full_realm_small_mobs_trivial():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         last = R.num_stages(r) - 1
         assert B.map_run_winrate(r, last, MAP_OF[r]) >= 0.98
 
@@ -102,7 +103,7 @@ def test_full_realm_small_mobs_trivial():
 # ---- 地图随机 Boss 作为成长门槛(#15-2) ----
 
 def test_map_boss_is_a_gate():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         last = R.num_stages(r) - 1
         entry = B.winrate(r, 0, _boss(r))
         full = B.winrate(r, last, _boss(r))
@@ -112,7 +113,7 @@ def test_map_boss_is_a_gate():
 
 def test_map_boss_beatable_by_mid_realm():
     # 至少在本境界中期(stage1)起能稳定击杀随机 Boss。
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         assert B.winrate(r, 1, _boss(r)) >= 0.85
 
 
@@ -154,7 +155,7 @@ def test_world_boss_total_hp_scaled_not_one_shot():
 
 def test_each_realm_has_three_difficulty_maps():
     from config.maps import maps_at_realm
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         assert [m["difficulty"] for _, m in maps_at_realm(r)] == ["易", "中", "难"]
 
 
@@ -179,7 +180,7 @@ def test_hard_maps_have_exclusive_drops():
 
 def test_hard_maps_riskier_than_easy_at_entry():
     # 同境界刚解锁时,难图连战胜率应明显低于易图(高风险)。
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         easy, _mid, hard = TIERS[r]
         assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
@@ -204,11 +205,20 @@ def test_buy_stamina_costlier_than_best_content_yield():
     """首买精力的单位成本须高于该境界最佳内容的灵石/精力产出,
     使"买精力→刷最佳内容"平均净收益为负(不能稳定套利)。"""
     from services import shop
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         cost = shop.first_buy_cost_per_stamina(r)
         yield_per = B.best_content_stone_per_stamina(r)
         assert cost > yield_per, (
             f"r{r} 首买 {cost:.1f} 灵石/精力 未高于最佳产出 {yield_per:.1f}，仍可套利")
+
+
+def test_huashen_maps_keep_stone_margin_below_stamina_buy():
+    from services import shop
+
+    cap = shop.first_buy_cost_per_stamina(4) * 0.75
+    for key in TIERS[4]:
+        yield_per = B.map_stone_per_stamina(key)
+        assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于化神首买 75%({cap:.1f})"
 
 
 def _boss(realm: int):

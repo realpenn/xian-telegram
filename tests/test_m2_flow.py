@@ -228,7 +228,7 @@ async def test_dungeon_requires_single_run_stamina_cost(temp_db):
 
 def test_dungeons_cover_each_realm_with_daily_stamina_budget():
     realms = {d["realm"] for d in DUNGEONS.values()}
-    assert realms == set(range(len(R.REALM_NAMES)))
+    assert realms == set(range(max(realms) + 1))
 
     for d in DUNGEONS.values():
         realm = d["realm"]

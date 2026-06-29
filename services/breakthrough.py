@@ -8,7 +8,7 @@ import json
 import random
 import time
 
-from config.events import TRIBULATION_ACTIONS
+from config.events import SHENHUN_TRIBULATION_ACTIONS, TRIBULATION_ACTIONS
 from config.items import ITEMS
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
@@ -79,14 +79,19 @@ async def _fail(conn, user_id: int, cultivation: int, rate: float, trib: bool,
             "debuff_seconds": UNSTABLE_SECONDS}
 
 
-def _tribulation_choices() -> list[dict]:
-    return [{"key": key, "label": cfg["label"]} for key, cfg in TRIBULATION_ACTIONS.items()]
+def _tribulation_actions(target_realm: int) -> dict:
+    return SHENHUN_TRIBULATION_ACTIONS if target_realm == 4 else TRIBULATION_ACTIONS
+
+
+def _tribulation_choices(target_realm: int) -> list[dict]:
+    actions = _tribulation_actions(target_realm)
+    return [{"key": key, "label": cfg["label"]} for key, cfg in actions.items()]
 
 
 def _tribulation_status(row) -> dict:
     return {"status": "tribulation_choice", "tribulation": True,
             "thunder_index": row["thunder_index"], "total": 3,
-            "hp": row["hp"], "choices": _tribulation_choices(),
+            "hp": row["hp"], "choices": _tribulation_choices(row["target_realm"]),
             "tribulation_log": json.loads(row["log_json"] or "[]")}
 
 
@@ -174,13 +179,13 @@ async def try_advance(user_id: int, now: int = None) -> dict:
 
 async def choose_tribulation_action(user_id: int, action_key: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
-    action = TRIBULATION_ACTIONS.get(action_key)
-    if not action:
-        return {"status": "bad_action"}
     async with db.transaction() as conn:
         row = await _session(conn, user_id)
         if not row:
             return {"status": "no_tribulation"}
+        action = _tribulation_actions(row["target_realm"]).get(action_key)
+        if not action:
+            return {"status": "bad_action"}
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
@@ -210,7 +215,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         hp -= dmg
         logs = json.loads(row["log_json"] or "[]")
         logs.append(action["text"])
-        logs.append(f"第 {idx} 道雷劫落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
+        trial_name = "神魂劫" if row["target_realm"] == 4 else "雷劫"
+        logs.append(f"第 {idx} 道{trial_name}落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
         if hp <= 0:
             await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
             return await _fail(conn, user_id, row["cultivation"], row["rate"], True,

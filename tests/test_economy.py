@@ -82,6 +82,10 @@ async def test_render_shop_shows_next_stamina_buy_cost(temp_db):
     _, markup = await shop_handler.render_shop(uid, now=now)
     assert markup.inline_keyboard[0][0].text == (
         f"购买精力（🪙{shop_cfg.stamina_buy_cost(3, 3)} / ⚡{shop_cfg.STAMINA_BUY_GAIN}）")
+def test_huashen_stamina_price_and_pill_not_in_shop():
+    assert shop_cfg.stamina_buy_cost(4, 1) == 2800
+    assert shop_cfg.stamina_buy_cost(4, 2) == 5600
+    assert "化神丹" not in shop_cfg.SHOP_ITEMS
 
 
 @pytest.mark.asyncio

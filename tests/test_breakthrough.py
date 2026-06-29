@@ -32,8 +32,12 @@ def test_realm_progression_flags():
     assert R.next_stage(0, 0) == (0, 1)
 
     last_yy = R.num_stages(3) - 1
-    assert R.next_stage(3, last_yy) is None
-    assert not R.is_big_breakthrough(3, last_yy)
+    assert R.next_stage(3, last_yy) == (4, 0)
+    assert R.is_big_breakthrough(3, last_yy)
+
+    last_hs = R.num_stages(4) - 1
+    assert R.next_stage(4, last_hs) is None
+    assert not R.is_big_breakthrough(4, last_hs)
 
 
 def test_base_stats_increase_with_stage():

@@ -49,8 +49,9 @@ CREATE TABLE IF NOT EXISTS characters (
 CREATE TABLE IF NOT EXISTS inventory (
     user_id   INTEGER NOT NULL,
     item_key  TEXT NOT NULL,
+    bound     INTEGER NOT NULL DEFAULT 0,
     qty       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, item_key)
+    PRIMARY KEY (user_id, item_key, bound)
 );
 CREATE TABLE IF NOT EXISTS character_skills (
     user_id    INTEGER NOT NULL,
@@ -325,6 +326,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "explore_runs", "event_choice", "TEXT")
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
+    await _migrate_inventory_bound(_conn)
     await _conn.commit()
     # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
     _read_conn = await aiosqlite.connect(db_path)
@@ -364,6 +366,26 @@ async def _ensure_column(conn, table: str, column: str, definition: str):
     await cur.close()
     if column not in columns:
         await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+async def _migrate_inventory_bound(conn):
+    cur = await conn.execute("PRAGMA table_info(inventory)")
+    columns = {row[1] for row in await cur.fetchall()}
+    await cur.close()
+    if "bound" in columns:
+        return
+    await conn.execute(
+        "CREATE TABLE inventory_new ("
+        "user_id INTEGER NOT NULL, "
+        "item_key TEXT NOT NULL, "
+        "bound INTEGER NOT NULL DEFAULT 0, "
+        "qty INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (user_id, item_key, bound))")
+    await conn.execute(
+        "INSERT INTO inventory_new(user_id, item_key, bound, qty) "
+        "SELECT user_id, item_key, 0, qty FROM inventory")
+    await conn.execute("DROP TABLE inventory")
+    await conn.execute("ALTER TABLE inventory_new RENAME TO inventory")
 
 
 async def fetchone(sql, params=()):

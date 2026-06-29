@@ -89,8 +89,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                 collected.append({"kind": "equipment", "name": item_name(base_key)})
             else:
                 await conn.execute(
-                    "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-                    "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+                    "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+                    "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
                     (user_id, output["key"], output["qty"], output["qty"]))
                 collected.append({"kind": "item", "name": item_name(output["key"]), "qty": output["qty"]})
             column = "alchemy_prof" if recipe["type"] == "alchemy" else "forge_prof"
@@ -136,19 +136,14 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
         if char["spirit_stone"] < recipe["stone"]:
             return {"status": "no_stone", "need": recipe["stone"], "have": char["spirit_stone"]}
         for key, qty in recipe["materials"].items():
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, key))
-            inv = await cur.fetchone()
-            await cur.close()
-            if not inv or inv["qty"] < qty:
-                return {"status": "no_material", "item": key, "need": qty, "have": inv["qty"] if inv else 0}
+            have = await character.item_qty_conn(conn, user_id, key)
+            if have < qty:
+                return {"status": "no_material", "item": key, "need": qty, "have": have}
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (recipe["stone"], user_id))
         for key, qty in recipe["materials"].items():
-            await conn.execute(
-                "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
-                (qty, user_id, key))
+            await character.consume_item_conn(conn, user_id, key, qty)
         finish_at = now + recipe["seconds"]
         await conn.execute(
             "INSERT INTO crafting_jobs(user_id, craft_type, recipe_key, start_at, finish_at, status) "

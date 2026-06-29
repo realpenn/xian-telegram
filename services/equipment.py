@@ -11,6 +11,7 @@ from config.equipment import (ENHANCE_MAX_LEVEL, QIHUN_KEY, decompose_yield,
                               enhance_cost, reforge_cost)
 from config.items import equipment_slot, item_name
 from models import db
+from services import character
 from services.crafting import _roll_affixes
 
 
@@ -31,18 +32,14 @@ async def _char_row(conn, user_id: int):
 
 
 async def _item_qty(conn, user_id: int, key: str) -> int:
-    cur = await conn.execute(
-        "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, key))
-    row = await cur.fetchone()
-    await cur.close()
-    return row["qty"] if row else 0
+    return await character.item_qty_conn(conn, user_id, key)
 
 
-async def _add_item(conn, user_id: int, key: str, qty: int):
+async def _add_item(conn, user_id: int, key: str, qty: int, bound: int = 0):
     await conn.execute(
-        "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-        "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
-        (user_id, key, qty, qty))
+        "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,?,?) "
+        "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
+        (user_id, key, int(bool(bound)), qty, qty))
 
 
 async def _charge(conn, user_id: int, cost: dict) -> dict:
@@ -63,9 +60,7 @@ async def _charge(conn, user_id: int, cost: dict) -> dict:
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (stone_cost, user_id))
     for key, qty in mats.items():
-        await conn.execute(
-            "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
-            (qty, user_id, key))
+        await character.consume_item_conn(conn, user_id, key, qty)
     return {"status": "ok"}
 
 

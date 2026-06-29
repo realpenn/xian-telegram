@@ -172,7 +172,7 @@ async def _display_name(user_id: int, fallback: str) -> str:
 
 async def _combatant(user_id: int, name: str) -> Combatant:
     char = await character.get(user_id)
-    st = await character.stats(char)
+    st = await character.stats(char, pvp=True)
     skills = await character.get_skills(user_id)
     mods = await character.combat_mods(user_id)
     return Combatant(name=name, hp=st["hp"], mp=st["mp"], atk=st["atk"],

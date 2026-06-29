@@ -8,6 +8,7 @@ from config.shop import (SHOP_ITEMS, STAMINA_BUY_DAILY_LIMIT, STAMINA_BUY_GAIN,
                          shop_price, stamina_buy_cost)
 from config import realms as R
 from models import db
+from services import character
 
 
 def _day(ts: int) -> str:
@@ -57,8 +58,8 @@ async def buy(user_id: int, item_key: str, qty: int = 1) -> dict:
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (cost, user_id))
         await conn.execute(
-            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
             (user_id, item_key, qty, qty))
         return {"status": "ok", "item": item_name(item_key), "qty": qty, "cost": cost}
 
@@ -68,16 +69,11 @@ async def sell(user_id: int, item_key: str, qty: int = 1) -> dict:
     if price <= 0 or qty <= 0:
         return {"status": "bad_item"}
     async with db.transaction() as conn:
-        cur = await conn.execute(
-            "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, item_key))
-        inv = await cur.fetchone()
-        await cur.close()
-        if not inv or inv["qty"] < qty:
-            return {"status": "no_item", "item": item_name(item_key), "have": inv["qty"] if inv else 0}
+        have = await character.item_qty_conn(conn, user_id, item_key, bound=0)
+        if have < qty:
+            return {"status": "no_item", "item": item_name(item_key), "have": have}
         gain = price * qty
-        await conn.execute(
-            "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
-            (qty, user_id, item_key))
+        await character.consume_item_conn(conn, user_id, item_key, qty, bound=0)
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (gain, user_id))

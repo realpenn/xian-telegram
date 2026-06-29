@@ -25,12 +25,8 @@ async def use(user_id: int, item_key: str, now: int = None) -> dict:
     if not item:
         return {"status": "bad_item"}
     async with db.transaction() as conn:
-        cur = await conn.execute(
-            "SELECT qty FROM inventory WHERE user_id=? AND item_key=?",
-            (user_id, item_key))
-        inv = await cur.fetchone()
-        await cur.close()
-        if not inv or inv["qty"] < 1:
+        have = await character.item_qty_conn(conn, user_id, item_key)
+        if have < 1:
             return {"status": "no_item", "item": item_name(item_key)}
         row = await character._select_character(conn, user_id)
         if not row:
@@ -56,9 +52,7 @@ async def use(user_id: int, item_key: str, now: int = None) -> dict:
 
 
 async def _consume(conn, user_id: int, item_key: str):
-    await conn.execute(
-        "UPDATE inventory SET qty = MAX(0, qty - 1) WHERE user_id=? AND item_key=?",
-        (user_id, item_key))
+    await character.consume_item_conn(conn, user_id, item_key, 1)
 
 
 async def _learn_recipe(conn, user_id: int, item_key: str, item: dict) -> dict:

@@ -14,6 +14,7 @@ from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
 from models import db
 from services import game_events
+from services import character as character_service
 
 FAIL_CULT_LOSS = 0.30
 UNSTABLE_SECONDS = 6 * 3600
@@ -126,16 +127,9 @@ async def try_advance(user_id: int, now: int = None) -> dict:
         if is_big_breakthrough(char["realm"], char["stage"]):
             target = char["realm"] + 1
             pill = BIG_BREAKTHROUGH[target]["pill"]
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, pill))
-            item = await cur.fetchone()
-            await cur.close()
-            if not item or item["qty"] < 1:
+            if await character_service.item_qty_conn(conn, user_id, pill) < 1:
                 return {"status": "need_pill", "pill": pill}
-            await conn.execute(
-                "UPDATE inventory SET qty = MAX(0, qty - 1) "
-                "WHERE user_id=? AND item_key=?",
-                (user_id, pill))
+            await character_service.consume_item_conn(conn, user_id, pill, 1)
             mods = await _breakthrough_mods(conn, user_id)
             rate = big_success_rate(char["realm"], char["root_bone"], mods["rate"])
             trib = BIG_BREAKTHROUGH[target]["tribulation"]
@@ -193,16 +187,9 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
             return {"status": "missing"}
         item_key = action.get("item")
         if item_key:
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?",
-                (user_id, item_key))
-            inv = await cur.fetchone()
-            await cur.close()
-            if not inv or inv["qty"] < 1:
+            if await character_service.item_qty_conn(conn, user_id, item_key) < 1:
                 return {"status": "need_item", "item": item_key}
-            await conn.execute(
-                "UPDATE inventory SET qty=MAX(0, qty-1) WHERE user_id=? AND item_key=?",
-                (user_id, item_key))
+            await character_service.consume_item_conn(conn, user_id, item_key, 1)
 
         stats = base_stats(row["source_realm"], row["source_stage"])
         max_hp = stats["hp"]

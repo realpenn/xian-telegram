@@ -288,6 +288,13 @@ CREATE TABLE IF NOT EXISTS path_events (
     amount      INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ascension (
+    user_id     INTEGER PRIMARY KEY,
+    level       INTEGER NOT NULL DEFAULT 0,
+    points      INTEGER NOT NULL DEFAULT 0,
+    spent_json  TEXT NOT NULL DEFAULT '{}',
+    updated_at  INTEGER NOT NULL
+);
 """
 
 

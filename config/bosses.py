@@ -37,6 +37,15 @@ WORLD_BOSSES = {
             "df": 1250, "spd": 280, "crit": 110, "skills": ["普攻", "烈火诀", "金钟罩"],
         },
     },
+    "huashen": {
+        "name": "天外魔尊", "realm": 4, "total_hp": 900000, "duration": 2 * 3600,
+        "stamina": 18, "stone_pool": 18000,
+        "drops": {"星陨砂": 10, "幽都魂晶": 8, "天外残玉": 6, "转修令": 2},
+        "combat": {
+            "name": "天外魔尊", "hp": 30000000, "mp": 5000, "atk": 4200,
+            "df": 3300, "spd": 780, "crit": 260, "skills": ["普攻", "快剑斩", "烈火诀", "金钟罩"],
+        },
+    },
 }
 
 # Boss 血量按本群已知修仙者人数缩放；达到该人数后使用配置满血。
@@ -46,7 +55,7 @@ WORLD_BOSS_FULL_HP_CULTIVATORS = 10
 DEFAULT_BOSS = "zhuji"
 LEGACY_BOSS_ALIASES = {"ancient_dragon": "zhuji"}
 
-_REALM_TIER = {0: "zhuji", 1: "zhuji", 2: "jindan", 3: "yuanying"}
+_REALM_TIER = {0: "zhuji", 1: "zhuji", 2: "jindan", 3: "yuanying", 4: "huashen"}
 
 
 def canonical_boss_key(key: str) -> str:

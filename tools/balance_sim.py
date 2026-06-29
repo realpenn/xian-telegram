@@ -26,6 +26,8 @@ from services.combat import Combatant, simulate
 GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
           "mind": "吐纳诀", "equip": ["玄铁剑", "青木甲", "聚灵佩"]}
 STARTER = {"skills": ["快剑斩", "普攻"], "mind": "吐纳诀", "equip": ["新手剑"]}
+HUASHEN_GEARED = {"skills": ["快剑斩", "烈火诀", "回春术", "普攻"],
+                  "mind": "归元心法", "equip": ["陨星剑", "幽都甲", "太虚佩"]}
 DAO_MAX_PROFILES = {
     key: {**GEARED, "dao_path": key, "dao_rank": len(DAO.RANK_NAMES) - 1}
     for key in DAO.DAO_PATHS
@@ -155,10 +157,10 @@ def boss_damage_per_challenge(realm: int, stage: int, boss_key: str,
     return total / n
 
 
-def world_boss_kill_challenges(boss_key: str, realm: int, stage: int, n: int = 200) -> float:
+def world_boss_kill_challenges(boss_key: str, realm: int, stage: int, n: int = 200, profile=GEARED) -> float:
     """该档玩家击杀世界 Boss 所需的总挑战次数 = total_hp / 单次伤害。"""
     cfg = WORLD_BOSSES[boss_key]
-    return cfg["total_hp"] / boss_damage_per_challenge(realm, stage, boss_key, n=n)
+    return cfg["total_hp"] / boss_damage_per_challenge(realm, stage, boss_key, profile=profile, n=n)
 
 
 def breakthrough_rate_with_profile(base_rate: float, profile=GEARED) -> float:

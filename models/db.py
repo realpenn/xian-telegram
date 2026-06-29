@@ -295,6 +295,28 @@ CREATE TABLE IF NOT EXISTS ascension (
     spent_json  TEXT NOT NULL DEFAULT '{}',
     updated_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS weekly_activity (
+    user_id     INTEGER NOT NULL,
+    week        TEXT NOT NULL,
+    runs        INTEGER NOT NULL DEFAULT 0,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, week)
+);
+CREATE TABLE IF NOT EXISTS sect_outposts (
+    sect_id     INTEGER PRIMARY KEY,
+    outpost_key TEXT NOT NULL,
+    score       INTEGER NOT NULL DEFAULT 0,
+    season      TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS pvp_season_rewards (
+    user_id     INTEGER NOT NULL,
+    season      TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    claimed_at  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, season)
+);
 """
 
 

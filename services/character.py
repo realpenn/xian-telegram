@@ -154,6 +154,15 @@ async def _has_active_job(conn, user_id: int) -> bool:
     return row is not None
 
 
+async def _add_daohang_event(conn, user_id: int, amount: int, event_type: str, now: int):
+    if amount <= 0:
+        return
+    await conn.execute(
+        "INSERT INTO path_events(user_id, path_key, event_type, amount, created_at) "
+        "VALUES(?,NULL,?,?,?)",
+        (user_id, event_type, amount, now))
+
+
 async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     async with db.transaction() as conn:
@@ -187,10 +196,13 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                     activity_windows=windows,
                     active_factor=activity.SECLUSION_ACTIVE_FACTOR)
                 _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
+                new_cult, daohang = settle.overflow_to_daohang(
+                    row["realm"], row["stage"], row["cultivation"], auto_gain)
+                await _add_daohang_event(conn, user_id, daohang, "overflow", now)
                 await conn.execute(
-                    "UPDATE characters SET cultivation = cultivation + ?, debuff_json = ? "
+                    "UPDATE characters SET cultivation = ?, daohang = daohang + ?, debuff_json = ? "
                     "WHERE user_id=?",
-                    (auto_gain, json.dumps(state, ensure_ascii=False), user_id))
+                    (new_cult, daohang, json.dumps(state, ensure_ascii=False), user_id))
 
         await conn.execute(
             "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
@@ -770,14 +782,16 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             activity_windows=windows,
             active_factor=activity.SECLUSION_ACTIVE_FACTOR)
         _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
-        new_cult = row["cultivation"] + gained
+        new_cult, daohang = settle.overflow_to_daohang(
+            row["realm"], row["stage"], row["cultivation"], gained)
+        await _add_daohang_event(conn, user_id, daohang, "overflow", now)
         await conn.execute(
-            "UPDATE characters SET cultivation=?, stamina=?, stamina_at=?, "
+            "UPDATE characters SET cultivation=?, daohang=daohang+?, stamina=?, stamina_at=?, "
             "seclusion_at=NULL, debuff_json=? "
             "WHERE user_id=?",
-            (new_cult, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
+            (new_cult, daohang, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
         cost = R.advance_cost(row["realm"], row["stage"])
-        return {"status": "collected", "gained": gained, "cultivation": new_cult,
+        return {"status": "collected", "gained": gained, "daohang": daohang, "cultivation": new_cult,
                 "cost": cost, "can_advance": new_cult >= cost,
                 "minutes": max(0, (now - row["seclusion_at"]) // 60)}
 

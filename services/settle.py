@@ -14,6 +14,25 @@ HP_FLOOR_PCT = 0.20           # 活动结束写回的重伤地板：胜负都不
 # 保留此常量作为基线（筑基档 24h），仅供外部参考。
 SECLUSION_STAGE_SECONDS = 24 * 3600
 CULTIVATION_SCALE = 1_000_000
+DAOHANG_FULL_REALM_RATE = 0.30
+DAOHANG_PRE_CAP_RATE = 0.15
+
+
+def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int]:
+    """满级/准满级溢出修为转道行，返回 (保留修为, 获得道行)。"""
+    cur_cult = max(0, int(cur_cult))
+    gain = max(0, int(gain))
+    total = cur_cult + gain
+    if realm == len(R.REALM_NAMES) - 1 and stage == R.num_stages(realm) - 1:
+        cap = R.advance_cost(realm, stage)
+        overflow = max(0, total - cap)
+        return min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE)
+    if realm == len(R.REALM_NAMES) - 2 and stage == R.num_stages(realm) - 1:
+        cap = R.advance_cost(realm, stage)
+        if cur_cult >= cap:
+            overflow = max(0, total - cap)
+            return min(total, cap), int(overflow * DAOHANG_PRE_CAP_RATE)
+    return total, 0
 
 
 def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):

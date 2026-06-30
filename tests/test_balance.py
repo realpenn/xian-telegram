@@ -236,14 +236,26 @@ def test_huashen_maps_keep_stone_margin_below_stamina_buy():
 
 # ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----
 
-def test_mid_huashen_content_value_including_drops_under_first_buy():
-    """含掉落变现（坊市灵石流）后，元婴及以上最佳内容产出仍 < 首买精力成本。"""
+def test_all_realms_content_value_including_drops_under_first_buy():
+    """含掉落变现（坊市灵石流）后，全境界最佳内容产出均 < 首买精力成本。
+
+    秘境口径修正（扣入场费、drops 不放大）后，低境界 r0/r1 的微套利消除。
+    """
     from services import shop
-    for r in (2, 3, 4):
+    for r in range(len(R.REALM_NAMES)):
         cost = shop.first_buy_cost_per_stamina(r)
         value = B.best_content_value_per_stamina(r)
         assert value < cost, (
             f"r{r} 含掉落产出 {value:.1f} 未低于首买 {cost:.1f}，反套利红线失守")
+
+
+def test_dungeon_value_subtracts_entry_and_keeps_drops_unscaled():
+    """秘境反套利口径：扣入场费；drops 不受 reward_factor 放大（复刻 _resolve 仅 stone/cult 放大）。"""
+    xuanming = B.DUNGEONS["xuanming"]
+    gross_stone = (sum(xuanming["stone"]) / 2 * 5.0) / xuanming["stamina"]
+    assert B.dungeon_stone_per_stamina("xuanming") < gross_stone           # entry(80) 已扣
+    assert B.dungeon_drops_sell_per_stamina("xuanming") == (
+        B._drops_sell_expectation(xuanming["drops"]) / xuanming["stamina"])  # drops 不放大
 
 
 def test_activity_daohang_capped():

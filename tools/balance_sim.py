@@ -202,10 +202,10 @@ def map_stone_per_stamina(map_key: str) -> float:
 
 
 def dungeon_stone_per_stamina(dungeon_key: str, reward_factor: float = 5.0) -> float:
-    """满层结算近似:reward_factor≈4-6(取5),见 services.dungeon._resolve。"""
+    """秘境净灵石/精力：满层 stone(×reward_factor，复刻 _resolve 的 uniform(4,6)) 扣入场费。"""
     d = DUNGEONS[dungeon_key]
     gross = (sum(d["stone"]) / 2) * reward_factor
-    return gross / d["stamina"]
+    return (gross - float(d.get("entry_stone", 0))) / d["stamina"]
 
 
 def best_content_stone_per_stamina(realm: int) -> float:
@@ -238,10 +238,10 @@ def map_drops_sell_per_stamina(map_key: str) -> float:
     return _drops_sell_expectation(MAPS[map_key]["drops"]) / MAPS[map_key]["stamina"]
 
 
-def dungeon_drops_sell_per_stamina(dungeon_key: str, reward_factor: float = 5.0) -> float:
-    """秘境掉落 sell 近似，口径同 dungeon_stone_per_stamina(reward_factor)。"""
+def dungeon_drops_sell_per_stamina(dungeon_key: str) -> float:
+    """秘境掉落 sell/精力：drops 不受 reward_factor 放大（复刻 _resolve：仅 stone/cult 放大）。"""
     d = DUNGEONS[dungeon_key]
-    return _drops_sell_expectation(d["drops"]) * reward_factor / d["stamina"]
+    return _drops_sell_expectation(d["drops"]) / d["stamina"]
 
 
 def best_content_value_per_stamina(realm: int) -> float:

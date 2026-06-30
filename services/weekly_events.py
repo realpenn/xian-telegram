@@ -5,7 +5,7 @@ import time
 
 from config import weekly_events as CFG
 from models import db
-from services import activity
+from services import activity, character
 
 
 def _week(now: int) -> str:
@@ -31,13 +31,16 @@ async def run(user_id: int, theme_key: str = None, now: int = None) -> dict:
     theme = CFG.WEEKLY_THEMES[theme_key]
     week = _week(now)
     async with db.transaction() as conn:
-        cur = await conn.execute("SELECT stamina FROM characters WHERE user_id=?", (user_id,))
-        ch = await cur.fetchone()
-        await cur.close()
+        ch = await character._select_character(conn, user_id)
         if not ch:
             return {"status": "missing"}
-        if ch["stamina"] < CFG.RUN_STAMINA_COST:
-            return {"status": "no_stamina", "need": CFG.RUN_STAMINA_COST, "have": ch["stamina"]}
+        welfare = await character._sect_welfare(conn, user_id)
+        stamina, stamina_at = character._settled_stamina(ch, now, welfare)
+        if stamina < CFG.RUN_STAMINA_COST:
+            await conn.execute(
+                "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+                (stamina, stamina_at, user_id))
+            return {"status": "no_stamina", "need": CFG.RUN_STAMINA_COST, "have": stamina}
         cur = await conn.execute(
             "SELECT daohang FROM weekly_activity WHERE user_id=? AND week=?",
             (user_id, week))
@@ -46,8 +49,8 @@ async def run(user_id: int, theme_key: str = None, now: int = None) -> dict:
         used = row["daohang"] if row else 0
         daohang = min(CFG.RUN_DAOHANG_REWARD, max(0, CFG.WEEKLY_DAOHANG_CAP - used))
         await conn.execute(
-            "UPDATE characters SET stamina=stamina-?, daohang=daohang+? WHERE user_id=?",
-            (CFG.RUN_STAMINA_COST, daohang, user_id))
+            "UPDATE characters SET stamina=?, stamina_at=?, daohang=daohang+? WHERE user_id=?",
+            (stamina - CFG.RUN_STAMINA_COST, stamina_at, daohang, user_id))
         await conn.execute(
             "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,?) "
             "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",

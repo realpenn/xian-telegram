@@ -62,6 +62,26 @@ async def test_passive_upgrade_caps_at_five_levels(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_passive_upgrade_title_uses_total_level(temp_db):
+    uid = 9507
+    await character.create(uid, "title")
+    async with db.transaction() as conn:
+        await ascension.add_points_conn(conn, uid, 3, now=1000)
+
+    first = await ascension.upgrade_passive(uid, "hp_pct", now=1001)
+    second = await ascension.upgrade_passive(uid, "atk_pct", now=1002)
+    third = await ascension.upgrade_passive(uid, "df_pct", now=1003)
+    state = await ascension.get(uid)
+
+    assert first["title"] == "飞升新秀"
+    assert second["title"] == "飞升新秀"
+    assert third["title"] == "飞升真君"
+    assert third["level"] == 1
+    assert third["total_level"] == 3
+    assert state["level"] == 3
+
+
+@pytest.mark.asyncio
 async def test_ascension_passive_enters_stat_clamp(temp_db):
     uid = 9504
     await character.create(uid, "clamp")

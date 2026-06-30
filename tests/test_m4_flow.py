@@ -4,7 +4,7 @@ import pytest_asyncio
 from config import buffs as BUFFS
 from config import weekly_events as W
 from models import db
-from services import character, pvp, season, sect, sect_war, weekly_events
+from services import character, pvp, season, sect, sect_war, settle, weekly_events
 
 # 落在据点战开放窗口内（周六 20:30，上海时区）的确定性时间戳。
 WAR_OPEN = 1641040200
@@ -23,7 +23,10 @@ async def temp_db(tmp_path):
 async def test_weekly_activity_gives_bound_material_and_caps_daohang(temp_db):
     uid = 9601
     await character.create(uid, "event")
-    await db.execute("UPDATE characters SET stamina=? WHERE user_id=?", (500, uid))
+    await character.set_progress(uid, 4, 0, 0)
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (W.RUN_STAMINA_COST * 4, 1000, uid))
 
     gains = []
     for idx in range(4):
@@ -53,6 +56,27 @@ async def test_weekly_activity_records_activity_window(temp_db):
 
     assert row["kind"] == "weekly_activity"
     assert row["source_key"] == open_key
+
+
+@pytest.mark.asyncio
+async def test_weekly_activity_settles_stamina_regen_before_cost(temp_db):
+    uid = 9615
+    await character.create(uid, "regen")
+    await db.execute(
+        "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
+        (0, 1000, uid))
+    now = 1000 + W.RUN_STAMINA_COST * settle.STAMINA_REGEN_SECONDS
+    open_key = weekly_events.current_theme_key(now)
+
+    res = await weekly_events.run(uid, open_key, now=now)
+    row = await db.fetchone(
+        "SELECT stamina, stamina_at, daohang FROM characters WHERE user_id=?",
+        (uid,))
+
+    assert res["status"] == "ok"
+    assert row["stamina"] == 0
+    assert row["stamina_at"] == now
+    assert row["daohang"] == res["daohang"]
 
 
 @pytest.mark.asyncio

@@ -262,4 +262,3 @@ def test_shenhun_fail_text_uses_shenhun_label():
 
     assert "神魂劫凶险" in text
     assert "天劫凶猛" not in text
-

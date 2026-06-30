@@ -7,6 +7,8 @@ DAILY_LIMITS = {
     "explore.rare_drop": 1,
     "pvp.tier_up": 2,
     "sect.upgrade": 2,
+    "ascension.trial": 2,
+    "ascension.upgrade": 2,
 }
 
 MAX_ATTEMPTS = 5

@@ -19,9 +19,11 @@ async def render_ascension(user_id: int):
         return NEED_START, None
     state = await ascension.get(user_id)
     spent = state.get("spent", {})
+    title = CFG.ascension_title(state["level"])
+    title_line = f"　尊号：「{title}」" if title else ""
     lines = [
         "🌌 飞升",
-        f"飞升点：{state['points']}　总阶：{state['level']}　道行：{char.daohang}",
+        f"飞升点：{state['points']}　总阶：{state['level']}{title_line}　道行：{char.daohang}",
         f"飞升试炼：化神圆满可挑战，消耗道行 {CFG.TRIAL_DAOHANG_COST}，得飞升点 {CFG.TRIAL_POINT_REWARD}。",
         "—— 被动 ——",
     ]
@@ -44,7 +46,9 @@ def _result_text(res: dict) -> str:
     if s == "ok" and "points" in res:
         return f"飞升试炼成功，消耗道行 {res['cost']}，获得飞升点 {res['points']}。"
     if s == "ok":
-        return f"{res['name']} 被动升至 {res['level']} 级。"
+        title = res.get("title") or ""
+        unlock = f"　尊号「{title}」解锁！" if title else ""
+        return f"{res['name']} 被动升至 {res['level']} 级。{unlock}"
     if s == "locked":
         return "化神圆满后方可挑战飞升试炼。"
     if s == "no_daohang":

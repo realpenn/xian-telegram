@@ -1,17 +1,20 @@
 """V2 审计修复回归（docs/plans/v2/audit.md）。
 
-覆盖：A1 据点掉率合算、A4 丹修/器修真实生效、B3 化神丹残方配方。
+覆盖：A1 据点掉率合算、A4 丹修/器修真实生效、B3 化神丹残方配方、
+     C3 need_pill 来源指引 / 飞升播报 + 尊号。
 """
 import random
 
 import pytest
 import pytest_asyncio
 
+from config import ascension as ASC
 from config import realms as R
 from config import shop as SHOP
 from config.items import ITEMS
 from models import db
-from services import breakthrough, character, crafting, dao_path, items, sect_war
+from services import (ascension, breakthrough, character, crafting, dao_path, items,
+                      sect_war)
 
 
 @pytest_asyncio.fixture
@@ -96,3 +99,70 @@ async def test_huashen_pill_recipe_converts_scraps(temp_db):
     assert any(c["name"] == "化神丹" for c in collected)
     assert await character.item_qty(uid, "化神丹") == 1
     assert await character.item_qty(uid, "化神丹残方") == 0   # 残方被消费
+
+
+# ---- C3：need_pill 化神丹来源指引（spec T0.8）----
+
+def test_need_pill_huashen_hints_source():
+    from handlers import cultivate
+    huashen = cultivate._bt_text({"status": "need_pill", "pill": "化神丹"})
+    yuanjing = cultivate._bt_text({"status": "need_pill", "pill": "元婴丹"})
+
+    assert "天外古墟" in huashen                       # 给出化神丹出处
+    assert "化神丹残方" in huashen or "太虚天门" in huashen   # 或炼丹链路
+    assert "天外古墟" not in yuanjing                 # 非化神丹不给误导指引
+
+
+# ---- C3：飞升尊号派生 + 试炼/被动升级群播报（spec T3.5）----
+
+def test_ascension_title_thresholds():
+    assert ASC.ascension_title(0) == ""
+    assert ASC.ascension_title(1) == "飞升新秀"
+    assert ASC.ascension_title(3) == "飞升真君"
+    assert ASC.ascension_title(5) == "渡劫仙尊"
+
+
+async def _join_group(uid: int, chat_id: int):
+    """让玩家挂到一个群，使群播报能落库（social 依赖 bot_chat_members）。"""
+    await db.execute(
+        "INSERT INTO bot_chat_members(chat_id, user_id, last_seen_at) VALUES(?,?,?)",
+        (chat_id, uid, 1000))
+
+
+@pytest.mark.asyncio
+async def test_ascension_upgrade_broadcasts_with_title(temp_db):
+    uid = 7010
+    await character.create(uid, "feisheng")
+    await _join_group(uid, -1007010)
+    async with db.transaction() as conn:
+        await ascension.add_points_conn(conn, uid, 1, now=1000)
+
+    res = await ascension.upgrade_passive(uid, "hp_pct", now=1000)
+
+    assert res["status"] == "ok"
+    assert res["title"] == "飞升新秀"               # level 0→1 解锁首档尊号
+    rows = await db.fetchall(
+        "SELECT text FROM social_broadcasts WHERE user_id=? AND event_type='ascension.upgrade'",
+        (uid,))
+    assert rows, "ascension.upgrade 应触发群播报"
+    assert any("尊号" in r["text"] and "飞升新秀" in r["text"] for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_ascension_trial_broadcasts(temp_db):
+    uid = 7011
+    await character.create(uid, "trial-bc")
+    await character.set_progress(uid, 4, 3, R.advance_cost(4, 3))
+    await db.execute(
+        "UPDATE characters SET daohang=? WHERE user_id=?",
+        (ASC.TRIAL_DAOHANG_COST + 100, uid))
+    await _join_group(uid, -1007011)
+
+    res = await ascension.trial(uid, now=1000)
+
+    assert res["status"] == "ok"
+    rows = await db.fetchall(
+        "SELECT text FROM social_broadcasts WHERE user_id=? AND event_type='ascension.trial'",
+        (uid,))
+    assert rows, "ascension.trial 应触发群播报"
+    assert any("飞升试炼" in r["text"] for r in rows)

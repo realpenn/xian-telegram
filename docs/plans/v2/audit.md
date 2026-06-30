@@ -1,20 +1,13 @@
 # V2 (M0–M5) 验收审计
 
-> 基线：`uv run --with-requirements requirements.txt python -m pytest` 当前 **216 passed**。
-> P0/P1 问题已修复并落测试回归（详见 git 历史）。本文件仅保留剩余 P2 待办，修复后即移除。
+> 基线：`uv run --with-requirements requirements.txt python -m pytest` 当前 **225 passed**。
+> P0/P1 及 P2(C1–C3) 已修复并落测试回归（详见 git 历史）。本文件仅保留 C1 反套利校验中新发现的低境界观测项，决策后即移除。
 
 ---
 
-## P2 待办（低危 / DoD 缺口）
+## P2 观测（C1 反套利校验中新发现）
 
-### C1. M3/M4/M5 新增产出未进 balance_sim 反套利校验
-- **现象**：坊市灵石流、活动道行、飞升点均未进 `tools/balance_sim`，违反三段共同 DoD #3。
-- **验收**：balance_sim 覆盖坊市/活动/飞升产出，反套利红线显式校验；化神期"最佳内容产出 < 首买成本"在含新产出后仍成立。
-
-### C2. M0/M1 缺关键红线回归测试
-- **现象**：`YUANYING_FULL_BUFF` profile 与"元婴满 buff 刷化神中/难 Boss <5%"断言未写。实测成立（0%）但无回归护栏，M2 clamp/道途调整后无人看守。
-- **验收**：`tools/balance_sim` 补 `YUANYING_FULL_BUFF` profile；`tests/test_balance.py` 加"元婴圆满满 buff 打化神中/难 Boss 胜率 <5%"断言。
-
-### C3. 文案 / 播报缺口
-- **现象**：神魂劫 `need_pill` 未引导玩家去哪寻化神丹（T0.8）；M3 飞升被动升级/试炼成功无群播报、无称号解锁（T3.5）。
-- **验收**：`need_pill` 文案给出化神丹来源指引（化神难图 / 太虚天门 / 残方炼丹）；飞升成功发 `game_events` 群播报并解锁称号。
+### C4. 低境界(r0/r1)含掉落变现后微套利
+- **现象**：`balance_sim.best_content_value_per_stamina`（灵石+掉落 sell 口径，对应坊市灵石流）下，r0≈6.3 > 首买 6.0、r1≈15.3 > 首买 13.0，略超反套利红线。原仅算灵石口径时堵住（`test_buy_stamina_costlier_than_best_content_yield` 仍绿）。
+- **实际影响**：极小——首买为当日第 1 次（第 2/3 次翻倍至 240/480）、`STAMINA_BUY_DAILY_LIMIT=3` 封顶、炼气/筑基期灵石稀缺且快速升级，几乎无可观套利空间。
+- **验收**：化神期（C1 核心目标）已 ✅堵住（r4 含掉落 ≈126 < 首买 140，元婴 r2/结丹 r3 同样堵住）。低境界是否调参（微调低图材料 sell 或 `STAMINA_BUY_BASE[0/1]`）待产品决策；本条为诚实记录，非 M0–M5 验收 blocker。

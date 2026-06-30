@@ -212,6 +212,19 @@ def test_buy_stamina_costlier_than_best_content_yield():
             f"r{r} 首买 {cost:.1f} 灵石/精力 未高于最佳产出 {yield_per:.1f}，仍可套利")
 
 
+def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
+    """spec §3.2 红线：元婴圆满满 buff（推到 §6.3 合算上限）仍不得稳定刷化神中/难 Boss。
+
+    M2 道途 / 飞升被动调参后回归此断言，确保化神门槛未被回溯打穿。
+    """
+    from config.maps import MAPS
+    last = R.num_stages(3) - 1
+    for map_key in (TIERS[4][1], TIERS[4][2]):   # 幽都裂隙(中) / 天外古墟(难)
+        boss = MAPS[map_key]["boss"]
+        wr = B.winrate(3, last, boss, profile=B.YUANYING_FULL_BUFF, n=200)
+        assert wr < 0.05, f"{map_key} Boss 被元婴满 buff 刷穿：胜率 {wr:.2%}"
+
+
 def test_huashen_maps_keep_stone_margin_below_stamina_buy():
     from services import shop
 
@@ -219,6 +232,38 @@ def test_huashen_maps_keep_stone_margin_below_stamina_buy():
     for key in TIERS[4]:
         yield_per = B.map_stone_per_stamina(key)
         assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于化神首买 75%({cap:.1f})"
+
+
+# ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----
+
+def test_mid_huashen_content_value_including_drops_under_first_buy():
+    """含掉落变现（坊市灵石流）后，元婴及以上最佳内容产出仍 < 首买精力成本。"""
+    from services import shop
+    for r in (2, 3, 4):
+        cost = shop.first_buy_cost_per_stamina(r)
+        value = B.best_content_value_per_stamina(r)
+        assert value < cost, (
+            f"r{r} 含掉落产出 {value:.1f} 未低于首买 {cost:.1f}，反套利红线失守")
+
+
+def test_activity_daohang_capped():
+    """活动道行须有周上限，防无限刷 → 飞升点膨胀。"""
+    prof = B.activity_daohang_profile()
+    assert prof["capped"] is True
+    assert prof["weekly_cap"] > 0
+    assert prof["runs_to_cap"] >= 1
+
+
+def test_ascension_passive_within_clamp_and_nontradeable():
+    """飞升被动增益受 §6.3 clamp；飞升点非物品、不可交易。"""
+    guard = B.ascension_arbitrage_guard()
+    assert guard["within_clamp"] is True
+    assert guard["tradeable_violations"] == []
+
+
+def test_market_critical_materials_not_in_shop():
+    """关键突破丹/飞升链材料不得 NPC 直售（坊市套利护栏）。"""
+    assert B.market_arbitrage_violations() == []
 
 
 def _boss(realm: int):

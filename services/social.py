@@ -127,6 +127,13 @@ def _group_text(event_type: str, payload: dict) -> str:
         return f"🎁 {name} 历练得稀珍：{shown}。"
     if event_type == "sect.upgrade":
         return f"⛩️ 宗门「{payload.get('sect', '某宗')}」升至 {payload.get('level')} 级。"
+    if event_type == "ascension.trial":
+        return f"🌌 {name} 飞升试炼功成，获飞升点 ×{payload.get('points', 1)}。"
+    if event_type == "ascension.upgrade":
+        passive = payload.get("passive_name", "飞升被动")
+        title = payload.get("title") or ""
+        tail = f"，尊号「{title}」传开" if title else ""
+        return f"🌌 {name} 飞升精进，「{passive}」圆满{tail}。"
     return ""
 
 

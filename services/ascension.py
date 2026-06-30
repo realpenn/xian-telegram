@@ -77,8 +77,15 @@ async def upgrade_passive(user_id: int, passive_key: str, now: int = None) -> di
             "UPDATE ascension SET points=points-?, level=level+1, spent_json=?, updated_at=? "
             "WHERE user_id=?",
             (CFG.POINTS_PER_PASSIVE_LEVEL, json.dumps(spent, ensure_ascii=False), now, user_id))
-        return {"status": "ok", "passive": passive_key, "level": current + 1,
-                "name": CFG.passive_name(passive_key)}
+        new_level = current + 1
+        title = CFG.ascension_title(new_level)
+        # spec §6.3 T3.5：被动升级触发群播报；总阶晋档时附带尊号解锁。
+        await game_events.emit_conn(
+            conn, user_id, "ascension.upgrade",
+            {"passive": passive_key, "passive_name": CFG.passive_name(passive_key),
+             "level": new_level, "title": title}, now)
+        return {"status": "ok", "passive": passive_key, "level": new_level,
+                "name": CFG.passive_name(passive_key), "title": title}
 
 
 async def passive_bonuses(user_id: int) -> dict:

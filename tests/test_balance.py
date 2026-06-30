@@ -11,7 +11,7 @@
 from config import realms as R
 from tools import balance_sim as B
 
-MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场"}   # 各境界「易」档(向后兼容旧断言)
+MAP_OF = {1: "妖兽森林", 2: "万妖岭", 3: "上古战场", 4: "星陨海"}   # 各境界「易」档(向后兼容旧断言)
 DGN_OF = {1: "xuanming", 2: "qingyun", 3: "tianxu"}
 
 # 各大境界 (易, 中, 难) 三档地图(#20)。
@@ -20,14 +20,15 @@ TIERS = {
     1: ("妖兽森林", "赤霞岩谷", "枯骨沼泽"),
     2: ("万妖岭", "碧毒蛟潭", "九霄雷泽"),
     3: ("上古战场", "归墟裂谷", "天魔古原"),
+    4: ("星陨海", "幽都裂隙", "天外古墟"),
 }
 
 
 # ---- 闭关按境界配时长(#15-1) ----
 
 def test_seclusion_stage_seconds_increases_with_realm():
-    secs = [R.seclusion_stage_seconds(r) for r in range(4)]
-    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600]
+    secs = [R.seclusion_stage_seconds(r) for r in range(len(R.REALM_NAMES))]
+    assert secs == [16 * 3600, 24 * 3600, 36 * 3600, 48 * 3600, 96 * 3600]
     assert secs == sorted(secs)  # 越高境界每小阶越慢,抵消"小阶少→偏快"
 
 
@@ -86,7 +87,7 @@ def test_forge_craft_seconds_make_acceleration_meaningful():
 # ---- 刚突破即可参与新图普通内容(#15-2/3,核心验收) ----
 
 def test_entry_small_mobs_are_farmable():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         mob, _ = B.map_winrates(r, 0, MAP_OF[r])
         assert mob >= 0.99, f"r{r} 刚解锁小怪单场胜率过低: {mob:.2f}"
         run = B.map_run_winrate(r, 0, MAP_OF[r])
@@ -94,7 +95,7 @@ def test_entry_small_mobs_are_farmable():
 
 
 def test_full_realm_small_mobs_trivial():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         last = R.num_stages(r) - 1
         assert B.map_run_winrate(r, last, MAP_OF[r]) >= 0.98
 
@@ -102,7 +103,7 @@ def test_full_realm_small_mobs_trivial():
 # ---- 地图随机 Boss 作为成长门槛(#15-2) ----
 
 def test_map_boss_is_a_gate():
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         last = R.num_stages(r) - 1
         entry = B.winrate(r, 0, _boss(r))
         full = B.winrate(r, last, _boss(r))
@@ -112,7 +113,7 @@ def test_map_boss_is_a_gate():
 
 def test_map_boss_beatable_by_mid_realm():
     # 至少在本境界中期(stage1)起能稳定击杀随机 Boss。
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         assert B.winrate(r, 1, _boss(r)) >= 0.85
 
 
@@ -154,7 +155,7 @@ def test_world_boss_total_hp_scaled_not_one_shot():
 
 def test_each_realm_has_three_difficulty_maps():
     from config.maps import maps_at_realm
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         assert [m["difficulty"] for _, m in maps_at_realm(r)] == ["易", "中", "难"]
 
 
@@ -179,7 +180,7 @@ def test_hard_maps_have_exclusive_drops():
 
 def test_hard_maps_riskier_than_easy_at_entry():
     # 同境界刚解锁时,难图连战胜率应明显低于易图(高风险)。
-    for r in (1, 2, 3):
+    for r in (1, 2, 3, 4):
         easy, _mid, hard = TIERS[r]
         assert B.map_run_winrate(r, 0, hard) < B.map_run_winrate(r, 0, easy)
 
@@ -204,11 +205,77 @@ def test_buy_stamina_costlier_than_best_content_yield():
     """首买精力的单位成本须高于该境界最佳内容的灵石/精力产出,
     使"买精力→刷最佳内容"平均净收益为负(不能稳定套利)。"""
     from services import shop
-    for r in range(4):
+    for r in range(len(R.REALM_NAMES)):
         cost = shop.first_buy_cost_per_stamina(r)
         yield_per = B.best_content_stone_per_stamina(r)
         assert cost > yield_per, (
             f"r{r} 首买 {cost:.1f} 灵石/精力 未高于最佳产出 {yield_per:.1f}，仍可套利")
+
+
+def test_yuanying_full_buff_cannot_farm_huashen_mid_hard_bosses():
+    """spec §3.2 红线：元婴圆满满 buff（推到 §6.3 合算上限）仍不得稳定刷化神中/难 Boss。
+
+    M2 道途 / 飞升被动调参后回归此断言，确保化神门槛未被回溯打穿。
+    """
+    from config.maps import MAPS
+    last = R.num_stages(3) - 1
+    for map_key in (TIERS[4][1], TIERS[4][2]):   # 幽都裂隙(中) / 天外古墟(难)
+        boss = MAPS[map_key]["boss"]
+        wr = B.winrate(3, last, boss, profile=B.YUANYING_FULL_BUFF, n=200)
+        assert wr < 0.05, f"{map_key} Boss 被元婴满 buff 刷穿：胜率 {wr:.2%}"
+
+
+def test_huashen_maps_keep_stone_margin_below_stamina_buy():
+    from services import shop
+
+    cap = shop.first_buy_cost_per_stamina(4) * 0.75
+    for key in TIERS[4]:
+        yield_per = B.map_stone_per_stamina(key)
+        assert yield_per < cap, f"{key} 产出 {yield_per:.1f} 灵石/精力 未低于化神首买 75%({cap:.1f})"
+
+
+# ---- C1: 坊市/活动/飞升产出进反套利校验（spec DoD #3）----
+
+def test_all_realms_content_value_including_drops_under_first_buy():
+    """含掉落变现（坊市灵石流）后，全境界最佳内容产出均 < 首买精力成本。
+
+    秘境口径修正（扣入场费、drops 不放大）后，低境界 r0/r1 的微套利消除。
+    """
+    from services import shop
+    for r in range(len(R.REALM_NAMES)):
+        cost = shop.first_buy_cost_per_stamina(r)
+        value = B.best_content_value_per_stamina(r)
+        assert value < cost, (
+            f"r{r} 含掉落产出 {value:.1f} 未低于首买 {cost:.1f}，反套利红线失守")
+
+
+def test_dungeon_value_subtracts_entry_and_keeps_drops_unscaled():
+    """秘境反套利口径：扣入场费；drops 不受 reward_factor 放大（复刻 _resolve 仅 stone/cult 放大）。"""
+    xuanming = B.DUNGEONS["xuanming"]
+    gross_stone = (sum(xuanming["stone"]) / 2 * 5.0) / xuanming["stamina"]
+    assert B.dungeon_stone_per_stamina("xuanming") < gross_stone           # entry(80) 已扣
+    assert B.dungeon_drops_sell_per_stamina("xuanming") == (
+        B._drops_sell_expectation(xuanming["drops"]) / xuanming["stamina"])  # drops 不放大
+
+
+def test_activity_daohang_capped():
+    """活动道行须有周上限，防无限刷 → 飞升点膨胀。"""
+    prof = B.activity_daohang_profile()
+    assert prof["capped"] is True
+    assert prof["weekly_cap"] > 0
+    assert prof["runs_to_cap"] >= 1
+
+
+def test_ascension_passive_within_clamp_and_nontradeable():
+    """飞升被动增益受 §6.3 clamp；飞升点非物品、不可交易。"""
+    guard = B.ascension_arbitrage_guard()
+    assert guard["within_clamp"] is True
+    assert guard["tradeable_violations"] == []
+
+
+def test_market_critical_materials_not_in_shop():
+    """关键突破丹/飞升链材料不得 NPC 直售（坊市套利护栏）。"""
+    assert B.market_arbitrage_violations() == []
 
 
 def _boss(realm: int):

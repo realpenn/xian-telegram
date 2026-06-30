@@ -1,17 +1,17 @@
 """境界、属性、修为成本 —— 全部静态数值（初版可调）。
 
 防御属性键用 ``df``（避开 Python 关键字 ``def``），全局一致。
-大境界索引 0..3 = 炼气 / 筑基 / 金丹 / 元婴。
+大境界索引 0..4 = 炼气 / 筑基 / 金丹 / 元婴 / 化神。
 """
 from __future__ import annotations
 
-REALM_NAMES = ["炼气期", "筑基期", "金丹期", "元婴期"]
+REALM_NAMES = ["炼气期", "筑基期", "金丹期", "元婴期", "化神期"]
 
 _QI_LAYERS = ["一层", "二层", "三层", "四层", "五层", "六层", "七层",
               "八层", "九层", "十层", "十一层", "十二层", "十三层"]
 _SUB_STAGES = ["初期", "中期", "后期", "圆满"]
 
-REALM_STAGES = {0: _QI_LAYERS, 1: _SUB_STAGES, 2: _SUB_STAGES, 3: _SUB_STAGES}
+REALM_STAGES = {0: _QI_LAYERS, 1: _SUB_STAGES, 2: _SUB_STAGES, 3: _SUB_STAGES, 4: _SUB_STAGES}
 
 STAT_KEYS = ("hp", "mp", "atk", "df", "spd", "crit")
 
@@ -20,9 +20,10 @@ BIG_BREAKTHROUGH = {
     1: {"pill": "筑基丹", "base_rate": 0.80, "tribulation": False},
     2: {"pill": "金丹", "base_rate": 0.70, "tribulation": True},
     3: {"pill": "元婴丹", "base_rate": 0.60, "tribulation": True},
+    4: {"pill": "化神丹", "base_rate": 0.50, "tribulation": True},
 }
 
-_REALM_BASE_COST = {0: 200, 1: 800, 2: 6000, 3: 50000}
+_REALM_BASE_COST = {0: 200, 1: 800, 2: 6000, 3: 50000, 4: 450000}
 _STAGE_MULT = 1.20
 
 # 属性锚点：每大境界 (初阶, 圆满)，小阶间线性插值。
@@ -35,13 +36,15 @@ _ANCHORS = {
         dict(hp=5000, mp=600, atk=450, df=320, spd=160, crit=60)),
     3: (dict(hp=7000, mp=750, atk=620, df=450, spd=200, crit=72),
         dict(hp=16000, mp=1500, atk=1300, df=950, spd=380, crit=140)),
+    4: (dict(hp=24000, mp=2200, atk=1850, df=1350, spd=500, crit=175),
+        dict(hp=52000, mp=4200, atk=3800, df=2800, spd=900, crit=280)),
 }
 
-STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200}
+STAMINA_CAP = {0: 100, 1: 120, 2: 150, 3: 200, 4: 240}
 
 # 闭关每小阶目标时长（小时），按大境界配置（#15）。
 # 炼气小阶多、放快；金丹/元婴小阶少、放慢，抵消"高境界小阶少→整体推进偏快"。
-SECLUSION_STAGE_HOURS = {0: 16, 1: 24, 2: 36, 3: 48}
+SECLUSION_STAGE_HOURS = {0: 16, 1: 24, 2: 36, 3: 48, 4: 96}
 _DEFAULT_SECLUSION_HOURS = 24
 
 
@@ -75,7 +78,7 @@ def base_stats(realm: int, stage: int) -> dict:
 
 
 def next_stage(realm: int, stage: int):
-    """推进后的 (realm, stage)；已达 v1 顶（元婴圆满）返回 None。"""
+    """推进后的 (realm, stage)；已达当前顶点返回 None。"""
     if not is_last_stage(realm, stage):
         return realm, stage + 1
     if realm + 1 < len(REALM_NAMES):

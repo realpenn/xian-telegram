@@ -8,12 +8,14 @@ import json
 import random
 import time
 
-from config.events import TRIBULATION_ACTIONS
+from config.events import SHENHUN_TRIBULATION_ACTIONS, TRIBULATION_ACTIONS
 from config.items import ITEMS
 from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
                            next_stage, realm_label, base_stats)
 from models import db
 from services import game_events
+from services import character as character_service
+from services import dao_path
 
 FAIL_CULT_LOSS = 0.30
 UNSTABLE_SECONDS = 6 * 3600
@@ -79,14 +81,20 @@ async def _fail(conn, user_id: int, cultivation: int, rate: float, trib: bool,
             "debuff_seconds": UNSTABLE_SECONDS}
 
 
-def _tribulation_choices() -> list[dict]:
-    return [{"key": key, "label": cfg["label"]} for key, cfg in TRIBULATION_ACTIONS.items()]
+def _tribulation_actions(target_realm: int) -> dict:
+    return SHENHUN_TRIBULATION_ACTIONS if target_realm == 4 else TRIBULATION_ACTIONS
+
+
+def _tribulation_choices(target_realm: int) -> list[dict]:
+    actions = _tribulation_actions(target_realm)
+    return [{"key": key, "label": cfg["label"]} for key, cfg in actions.items()]
 
 
 def _tribulation_status(row) -> dict:
     return {"status": "tribulation_choice", "tribulation": True,
+            "target_realm": row["target_realm"],
             "thunder_index": row["thunder_index"], "total": 3,
-            "hp": row["hp"], "choices": _tribulation_choices(),
+            "hp": row["hp"], "choices": _tribulation_choices(row["target_realm"]),
             "tribulation_log": json.loads(row["log_json"] or "[]")}
 
 
@@ -121,18 +129,14 @@ async def try_advance(user_id: int, now: int = None) -> dict:
         if is_big_breakthrough(char["realm"], char["stage"]):
             target = char["realm"] + 1
             pill = BIG_BREAKTHROUGH[target]["pill"]
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, pill))
-            item = await cur.fetchone()
-            await cur.close()
-            if not item or item["qty"] < 1:
+            if await character_service.item_qty_conn(conn, user_id, pill) < 1:
                 return {"status": "need_pill", "pill": pill}
-            await conn.execute(
-                "UPDATE inventory SET qty = MAX(0, qty - 1) "
-                "WHERE user_id=? AND item_key=?",
-                (user_id, pill))
+            await character_service.consume_item_conn(conn, user_id, pill, 1)
             mods = await _breakthrough_mods(conn, user_id)
-            rate = big_success_rate(char["realm"], char["root_bone"], mods["rate"])
+            # 丹修道途 alchemy_pct 直接加成大突破成功率（口径同 balance_sim）。
+            dao_bonus = await dao_path.active_bonuses(user_id)
+            pill_bonus = mods["rate"] + float(dao_bonus.get("alchemy_pct", 0.0))
+            rate = big_success_rate(char["realm"], char["root_bone"], pill_bonus)
             trib = BIG_BREAKTHROUGH[target]["tribulation"]
             if random.random() >= rate:
                 return await _fail(conn, user_id, char["cultivation"], rate, trib, now=now)
@@ -174,13 +178,13 @@ async def try_advance(user_id: int, now: int = None) -> dict:
 
 async def choose_tribulation_action(user_id: int, action_key: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
-    action = TRIBULATION_ACTIONS.get(action_key)
-    if not action:
-        return {"status": "bad_action"}
     async with db.transaction() as conn:
         row = await _session(conn, user_id)
         if not row:
             return {"status": "no_tribulation"}
+        action = _tribulation_actions(row["target_realm"]).get(action_key)
+        if not action:
+            return {"status": "bad_action"}
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
@@ -188,16 +192,9 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
             return {"status": "missing"}
         item_key = action.get("item")
         if item_key:
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?",
-                (user_id, item_key))
-            inv = await cur.fetchone()
-            await cur.close()
-            if not inv or inv["qty"] < 1:
+            if await character_service.item_qty_conn(conn, user_id, item_key) < 1:
                 return {"status": "need_item", "item": item_key}
-            await conn.execute(
-                "UPDATE inventory SET qty=MAX(0, qty-1) WHERE user_id=? AND item_key=?",
-                (user_id, item_key))
+            await character_service.consume_item_conn(conn, user_id, item_key, 1)
 
         stats = base_stats(row["source_realm"], row["source_stage"])
         max_hp = stats["hp"]
@@ -210,7 +207,8 @@ async def choose_tribulation_action(user_id: int, action_key: str, now: int = No
         hp -= dmg
         logs = json.loads(row["log_json"] or "[]")
         logs.append(action["text"])
-        logs.append(f"第 {idx} 道雷劫落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
+        trial_name = "神魂劫" if row["target_realm"] == 4 else "雷劫"
+        logs.append(f"第 {idx} 道{trial_name}落下，承伤 {dmg}，余气血 {max(0, hp)}/{max_hp}")
         if hp <= 0:
             await conn.execute("DELETE FROM tribulation_sessions WHERE user_id=?", (user_id,))
             return await _fail(conn, user_id, row["cultivation"], row["rate"], True,

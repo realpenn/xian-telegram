@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 
 from config import realms as R
+from config import buffs as BUFFS
 from config.items import ITEMS, equipment_slot, item_name, weapon_bonus
 from config.equipment import ENHANCE_PER_LEVEL
 from config.sects import welfare as sect_welfare_config
@@ -14,6 +15,7 @@ from config.skills import (COMBAT_SLOTS, MIND_SLOT, SKILLS, STARTER_MIND, STARTE
                            is_mind_skill, skill_bonus)
 from models import db
 from services import activity, settle
+from services import ascension, dao_path, sect_war
 
 SPIRIT_ROOTS = ["天灵根", "金灵根", "木灵根", "水灵根", "火灵根",
                 "土灵根", "雷灵根", "冰灵根", "风灵根", "五行杂灵根"]
@@ -36,6 +38,7 @@ class Character:
     spirit_stone: int
     weapon_key: str
     debuff_json: dict
+    daohang: int
     current_hp: int = None   # None ⇒ 视为满（旧档/新建未 materialize）
     current_mp: int = None
     hp_at: int = None        # 气血回复惰性结算锚点；None ⇒ 视为 now
@@ -81,6 +84,7 @@ def _from_row(row, stamina: int = None, stamina_at: int = None) -> Character:
         seclusion_at=row["seclusion_at"] or 0,
         spirit_stone=row["spirit_stone"], weapon_key=row["weapon_key"],
         debuff_json=json.loads(row["debuff_json"] or "{}"),
+        daohang=row["daohang"] if "daohang" in row.keys() else 0,
         current_hp=row["current_hp"], current_mp=row["current_mp"],
         hp_at=row["hp_at"], mp_at=row["mp_at"])
 
@@ -99,11 +103,19 @@ def active_temporary_buffs(state: dict, now: int = None) -> list:
 
 
 def temporary_seclusion_pct(state: dict, now: int = None) -> float:
+    return clamp_seclusion_pct(raw_temporary_seclusion_pct(state, now))
+
+
+def raw_temporary_seclusion_pct(state: dict, now: int = None) -> float:
     pct = 0.0
     for buff in active_temporary_buffs(state, now):
         effects = buff.get("effects") or {}
         pct += float(effects.get("seclusion_pct", 0))
     return pct
+
+
+def clamp_seclusion_pct(pct: float) -> float:
+    return min(BUFFS.SECLUSION_PCT_CAP, max(0.0, float(pct)))
 
 
 def _seclusion_remainder(state: dict, realm: int, stage: int) -> int:
@@ -144,6 +156,15 @@ async def _has_active_job(conn, user_id: int) -> bool:
     return row is not None
 
 
+async def _add_daohang_event(conn, user_id: int, amount: int, event_type: str, now: int):
+    if amount <= 0:
+        return
+    await conn.execute(
+        "INSERT INTO path_events(user_id, path_key, event_type, amount, created_at) "
+        "VALUES(?,NULL,?,?,?)",
+        (user_id, event_type, amount, now))
+
+
 async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     async with db.transaction() as conn:
@@ -163,10 +184,15 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                 settle_start = last_seen + AUTO_SECLUSION_IDLE_SECONDS
                 welfare = await _sect_welfare(conn, user_id)
                 state = json.loads(row["debuff_json"] or "{}")
-                place_factor = (
-                    (1 + welfare["seclusion_pct"])
-                    * (1 + temporary_seclusion_pct(state, now))
-                )
+                path_bonus = await dao_path.active_bonuses(user_id)
+                asc_bonus = await ascension.passive_bonuses(user_id)
+                outpost = await sect_war.bonuses_for_user(user_id)
+                place_factor = 1 + clamp_seclusion_pct(
+                    welfare["seclusion_pct"]
+                    + raw_temporary_seclusion_pct(state, now)
+                    + float(path_bonus.get("seclusion_pct", 0))
+                    + float(asc_bonus.get("seclusion_pct", 0))
+                    + float(outpost.get("seclusion_pct", 0)))
                 windows = await activity.windows_for(user_id, settle_start, now, conn=conn)
                 auto_gain, remainder = settle.seclusion_gain_with_remainder(
                     row["realm"], row["stage"], settle_start, now,
@@ -176,10 +202,15 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                     activity_windows=windows,
                     active_factor=activity.SECLUSION_ACTIVE_FACTOR)
                 _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
+                new_cult, daohang, asc_pts = settle.overflow_split(
+                    row["realm"], row["stage"], row["cultivation"], auto_gain)
+                await _add_daohang_event(conn, user_id, daohang, "overflow", now)
+                if asc_pts:
+                    await ascension.add_points_conn(conn, user_id, asc_pts, now)
                 await conn.execute(
-                    "UPDATE characters SET cultivation = cultivation + ?, debuff_json = ? "
+                    "UPDATE characters SET cultivation = ?, daohang = daohang + ?, debuff_json = ? "
                     "WHERE user_id=?",
-                    (auto_gain, json.dumps(state, ensure_ascii=False), user_id))
+                    (new_cult, daohang, json.dumps(state, ensure_ascii=False), user_id))
 
         await conn.execute(
             "UPDATE users SET username=?, last_seen_at=? WHERE tg_user_id=?",
@@ -237,12 +268,15 @@ async def get_at(user_id: int, now: int = None):
     return _from_row(row, new_stam, new_at)
 
 
-async def stats(char: Character, equipped: list[dict] = None) -> dict:
+async def stats(char: Character, equipped: list[dict] = None, pvp: bool = False) -> dict:
     base = R.base_stats(char.realm, char.stage)
+    pct_bonus = {key: 0.0 for key in R.STAT_KEYS}
+    # 道途/飞升/据点来源单独累加：PvP 下仅这部分折半（spec §6.3），装备/心法/福利/丹药不折半。
+    pct_half = {key: 0.0 for key in R.STAT_KEYS}
     equipped = await equipped_items(char.user_id) if equipped is None else equipped
     if equipped:
         for inst in equipped:
-            _apply_equipment_bonus(base, equipment_bonus(inst), inst.get("enhance_level", 0))
+            _apply_equipment_bonus(base, pct_bonus, equipment_bonus(inst), inst.get("enhance_level", 0))
         if not equipped_weapon_key(equipped):
             for k, v in weapon_bonus(char.weapon_key).items():
                 base[k] = base.get(k, 0) + v
@@ -254,14 +288,32 @@ async def stats(char: Character, equipped: list[dict] = None) -> dict:
         for key, val in skill_bonus(mind).items():
             if key.endswith("_pct"):
                 stat_key = key[:-4]
-                base[stat_key] = int(base.get(stat_key, 0) * (1 + val))
+                if stat_key in pct_bonus:
+                    pct_bonus[stat_key] += float(val)
             else:
                 base[key] = base.get(key, 0) + val
-    _apply_temporary_stat_buffs(base, char.debuff_json)
+    for key, val in (await dao_path.active_bonuses(char.user_id)).items():
+        if key.endswith("_pct"):
+            stat_key = key[:-4]
+            if stat_key in pct_half:
+                pct_half[stat_key] += float(val)
+        elif key in R.STAT_KEYS:
+            base[key] = base.get(key, 0) + int(val)
+    for key, val in (await ascension.passive_bonuses(char.user_id)).items():
+        if key.endswith("_pct"):
+            stat_key = key[:-4]
+            if stat_key in pct_half:
+                pct_half[stat_key] += float(val)
+    outpost = await sect_war.bonuses_for_user(char.user_id)
+    if outpost.get("stat_pct"):
+        for key in R.STAT_KEYS:
+            pct_half[key] += float(outpost["stat_pct"])
+    _collect_temporary_stat_buffs(base, pct_bonus, char.debuff_json)
     welfare = await sect_welfare(char.user_id)
     if welfare["stat_pct"]:
         for key in R.STAT_KEYS:
-            base[key] = int(base[key] * (1 + welfare["stat_pct"]))
+            pct_bonus[key] += float(welfare["stat_pct"])
+    _apply_stat_pct_bonus(base, pct_bonus, pct_half, pvp=pvp)
     unstable_until = int(char.debuff_json.get("unstable_until", 0))
     if unstable_until > int(time.time()):
         for key in R.STAT_KEYS:
@@ -316,31 +368,50 @@ async def write_vitals(user_id: int, hp: int, mp: int, now: int, conn=None):
         await db.execute(sql, params)
 
 
-def _apply_equipment_bonus(base: dict, bonus: dict, enhance_level: int = 0):
+def _apply_equipment_bonus(base: dict, pct_bonus: dict, bonus: dict, enhance_level: int = 0):
     # 强化只放大装备的「平加属性」（hp/atk/df/...），不放大百分比词条与战斗修正。
     mult = 1.0 + max(0, enhance_level) * ENHANCE_PER_LEVEL
-    deferred = []
     for key, val in bonus.items():
         if key in COMBAT_MOD_KEYS:
             continue
         if key.endswith("_pct"):
             stat_key = key[:-4]
-            deferred.append((stat_key, float(val)))
+            if stat_key in pct_bonus:
+                pct_bonus[stat_key] += float(val)
         else:
             base[key] = base.get(key, 0) + int(round(val * mult))
-    for stat_key, pct in deferred:
-        base[stat_key] = int(base.get(stat_key, 0) * (1 + pct))
 
 
-def _apply_temporary_stat_buffs(base: dict, state: dict):
+def _collect_temporary_stat_buffs(base: dict, pct_bonus: dict, state: dict):
     for buff in active_temporary_buffs(state):
         for key, val in (buff.get("effects") or {}).items():
             if key.endswith("_pct"):
                 stat_key = key[:-4]
-                if stat_key in R.STAT_KEYS:
-                    base[stat_key] = int(base.get(stat_key, 0) * (1 + float(val)))
+                if stat_key in pct_bonus:
+                    pct_bonus[stat_key] += float(val)
             elif key in R.STAT_KEYS:
                 base[key] = base.get(key, 0) + int(val)
+
+
+def _apply_stat_pct_bonus(base: dict, pct_bonus: dict, pct_half: dict = None, pvp: bool = False):
+    # 非折半来源（装备/心法/福利/丹药）全额；折半来源（道途/飞升/据点）在 PvP ×PVP_PCT_FACTOR。
+    # 两者累加后再统一 clamp 到分区上限（合算上限，spec §6.3）。
+    factor = BUFFS.PVP_PCT_FACTOR if pvp else 1.0
+    pct_half = pct_half or {}
+    for key in pct_bonus:
+        cap = _stat_pct_cap(key)
+        raw = pct_bonus.get(key, 0.0) + pct_half.get(key, 0.0) * factor
+        applied = min(cap, max(0.0, raw))
+        if applied:
+            base[key] = int(base.get(key, 0) * (1 + applied))
+
+
+def _stat_pct_cap(key: str) -> float:
+    if key in BUFFS.ATTACK_STATS:
+        return BUFFS.ATTACK_PCT_CAP
+    if key in BUFFS.SURVIVAL_STATS:
+        return BUFFS.SURVIVAL_PCT_CAP
+    return BUFFS.SURVIVAL_PCT_CAP
 
 
 def equipment_bonus(inst: dict) -> dict:
@@ -382,10 +453,17 @@ async def knows_skill(user_id: int, skill_key: str) -> bool:
     return row is not None
 
 
-async def inventory(user_id: int):
-    rows = await db.fetchall(
-        "SELECT item_key, qty FROM inventory WHERE user_id=? AND qty>0 ORDER BY item_key",
-        (user_id,))
+async def inventory(user_id: int, bound: int | None = None):
+    if bound is None:
+        rows = await db.fetchall(
+            "SELECT item_key, SUM(qty) AS qty FROM inventory "
+            "WHERE user_id=? AND qty>0 GROUP BY item_key ORDER BY item_key",
+            (user_id,))
+    else:
+        rows = await db.fetchall(
+            "SELECT item_key, qty FROM inventory "
+            "WHERE user_id=? AND bound=? AND qty>0 ORDER BY item_key",
+            (user_id, int(bool(bound))))
     return [(r["item_key"], r["qty"]) for r in rows]
 
 
@@ -423,17 +501,64 @@ def _instance_from_row(row) -> dict:
     }
 
 
-async def item_qty(user_id: int, key: str) -> int:
-    row = await db.fetchone(
-        "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, key))
+async def item_qty(user_id: int, key: str, bound: int | None = None) -> int:
+    if bound is None:
+        row = await db.fetchone(
+            "SELECT COALESCE(SUM(qty), 0) AS qty FROM inventory WHERE user_id=? AND item_key=?",
+            (user_id, key))
+    else:
+        row = await db.fetchone(
+            "SELECT qty FROM inventory WHERE user_id=? AND item_key=? AND bound=?",
+            (user_id, key, int(bool(bound))))
     return row["qty"] if row else 0
 
 
-async def add_item(user_id: int, key: str, qty: int):
+async def add_item(user_id: int, key: str, qty: int, bound: int = 0):
     await db.execute(
-        "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-        "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = MAX(0, qty + ?)",
-        (user_id, key, max(0, qty), qty))
+        "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,?,?) "
+        "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = MAX(0, qty + ?)",
+        (user_id, key, int(bool(bound)), max(0, qty), qty))
+
+
+async def item_qty_conn(conn, user_id: int, key: str, bound: int | None = None) -> int:
+    if bound is None:
+        cur = await conn.execute(
+            "SELECT COALESCE(SUM(qty), 0) AS qty FROM inventory WHERE user_id=? AND item_key=?",
+            (user_id, key))
+    else:
+        cur = await conn.execute(
+            "SELECT qty FROM inventory WHERE user_id=? AND item_key=? AND bound=?",
+            (user_id, key, int(bool(bound))))
+    row = await cur.fetchone()
+    await cur.close()
+    return row["qty"] if row else 0
+
+
+async def consume_item_conn(conn, user_id: int, key: str, qty: int, bound: int | None = None) -> bool:
+    qty = int(qty)
+    if qty <= 0:
+        return True
+    have = await item_qty_conn(conn, user_id, key, bound)
+    if have < qty:
+        return False
+    bounds = [int(bool(bound))] if bound is not None else [1, 0]
+    left = qty
+    for b in bounds:
+        if left <= 0:
+            break
+        cur = await conn.execute(
+            "SELECT qty FROM inventory WHERE user_id=? AND item_key=? AND bound=?",
+            (user_id, key, b))
+        row = await cur.fetchone()
+        await cur.close()
+        if not row or row["qty"] <= 0:
+            continue
+        used = min(left, row["qty"])
+        await conn.execute(
+            "UPDATE inventory SET qty=qty-? WHERE user_id=? AND item_key=? AND bound=?",
+            (used, user_id, key, b))
+        left -= used
+    return True
 
 
 async def add_stone(user_id: int, amount: int):
@@ -575,12 +700,8 @@ async def learn_skill_from_pages(user_id: int, page_key: str) -> dict:
     if skill_key not in SKILLS:
         return {"status": "bad_page"}
     async with db.transaction() as conn:
-        cur = await conn.execute(
-            "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, page_key))
-        inv = await cur.fetchone()
-        await cur.close()
-        if not inv or inv["qty"] < need:
-            return {"status": "need_pages", "need": need, "have": inv["qty"] if inv else 0}
+        if not await consume_item_conn(conn, user_id, page_key, need):
+            return {"status": "need_pages", "need": need, "have": await item_qty_conn(conn, user_id, page_key)}
         if is_mind_skill(skill_key):
             slot = MIND_SLOT
             cur = await conn.execute(
@@ -620,9 +741,6 @@ async def learn_skill_from_pages(user_id: int, page_key: str) -> dict:
                 await conn.execute(
                     "INSERT INTO character_skills(user_id, skill_key, slot) VALUES(?,?,?)",
                     (user_id, skill_key, slot))
-        await conn.execute(
-            "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
-            (need, user_id, page_key))
         return {"status": "ok", "skill": skill_key, "slot": slot}
 
 
@@ -670,10 +788,15 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         welfare = await _sect_welfare(conn, user_id)
         stamina, stamina_at = _settled_stamina(row, now, welfare)
         state = json.loads(row["debuff_json"] or "{}")
-        place_factor = (
-            (1 + welfare["seclusion_pct"])
-            * (1 + temporary_seclusion_pct(state, now))
-        )
+        path_bonus = await dao_path.active_bonuses(user_id)
+        asc_bonus = await ascension.passive_bonuses(user_id)
+        outpost = await sect_war.bonuses_for_user(user_id)
+        place_factor = 1 + clamp_seclusion_pct(
+            welfare["seclusion_pct"]
+            + raw_temporary_seclusion_pct(state, now)
+            + float(path_bonus.get("seclusion_pct", 0))
+            + float(asc_bonus.get("seclusion_pct", 0))
+            + float(outpost.get("seclusion_pct", 0)))
         cap_seconds = (settle.OFFLINE_CAP_HOURS + welfare["offline_extra_hours"]) * 3600
         window_end = min(now, int(row["seclusion_at"]) + cap_seconds)
         windows = await activity.windows_for(user_id, row["seclusion_at"], window_end, conn=conn)
@@ -686,14 +809,19 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
             activity_windows=windows,
             active_factor=activity.SECLUSION_ACTIVE_FACTOR)
         _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
-        new_cult = row["cultivation"] + gained
+        new_cult, daohang, asc_pts = settle.overflow_split(
+            row["realm"], row["stage"], row["cultivation"], gained)
+        await _add_daohang_event(conn, user_id, daohang, "overflow", now)
+        if asc_pts:
+            await ascension.add_points_conn(conn, user_id, asc_pts, now)
         await conn.execute(
-            "UPDATE characters SET cultivation=?, stamina=?, stamina_at=?, "
+            "UPDATE characters SET cultivation=?, daohang=daohang+?, stamina=?, stamina_at=?, "
             "seclusion_at=NULL, debuff_json=? "
             "WHERE user_id=?",
-            (new_cult, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
+            (new_cult, daohang, stamina, stamina_at, json.dumps(state, ensure_ascii=False), user_id))
         cost = R.advance_cost(row["realm"], row["stage"])
-        return {"status": "collected", "gained": gained, "cultivation": new_cult,
+        return {"status": "collected", "gained": gained, "daohang": daohang,
+                "ascension": asc_pts, "cultivation": new_cult,
                 "cost": cost, "can_advance": new_cult >= cost,
                 "minutes": max(0, (now - row["seclusion_at"]) // 60)}
 
@@ -701,15 +829,36 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
 async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
                              cultivation: int = 0, drops: dict = None):
     await conn.execute(
-        "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?), "
-        "cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
-        (stone, cultivation, user_id))
+        "UPDATE characters SET spirit_stone = MAX(0, spirit_stone + ?) WHERE user_id=?",
+        (stone, user_id))
+    if cultivation:
+        # 发奖同样走溢出分流（#1）：化神圆满不再无限涨修为，越界转道行+飞升点。
+        # 对非满级为 no-op（kept=cur+gain, daohang=0, asc=0），不改变既有发奖语义。
+        cur = await conn.execute(
+            "SELECT realm, stage, cultivation FROM characters WHERE user_id=?",
+            (user_id,))
+        row = await cur.fetchone()
+        await cur.close()
+        if row:
+            new_cult, daohang, asc_pts = settle.overflow_split(
+                row["realm"], row["stage"], int(row["cultivation"] or 0), cultivation)
+            await conn.execute(
+                "UPDATE characters SET cultivation=?, daohang=daohang+? WHERE user_id=?",
+                (new_cult, daohang, user_id))
+            now = int(time.time())
+            await _add_daohang_event(conn, user_id, daohang, "reward", now)
+            if asc_pts:
+                await ascension.add_points_conn(conn, user_id, asc_pts, now)
+        else:
+            await conn.execute(
+                "UPDATE characters SET cultivation = MAX(0, cultivation + ?) WHERE user_id=?",
+                (cultivation, user_id))
     for key, qty in (drops or {}).items():
         if qty <= 0:
             continue
         await conn.execute(
-            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = MAX(0, qty + ?)",
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = MAX(0, qty + ?)",
             (user_id, key, qty, qty))
 
 

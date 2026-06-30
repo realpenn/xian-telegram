@@ -231,3 +231,34 @@ async def test_game_event_failure_does_not_roll_back_core_action(temp_db, monkey
     progress = await db.fetchall(
         "SELECT 1 FROM quest_progress WHERE user_id=?", (uid,))
     assert progress == []
+
+@pytest.mark.asyncio
+async def test_new_v2_handlers_render_without_missing_daohang(temp_db):
+    from handlers import ascension as ascension_handler
+    from handlers import dao_path as path_handler
+
+    uid = 8009
+    await character.create(uid, "v2ui")
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?", (123, uid))
+
+    path_text, path_markup = await path_handler.render_path(uid)
+    asc_text, asc_markup = await ascension_handler.render_ascension(uid)
+
+    assert "道行：123" in path_text
+    assert "道行：123" in asc_text
+    assert path_markup is not None
+    assert asc_markup is not None
+
+
+def test_shenhun_fail_text_uses_shenhun_label():
+    from handlers.cultivate import _bt_text
+
+    text = _bt_text({
+        "status": "big_fail",
+        "tribulation": True,
+        "loss": 100,
+        "tribulation_log": ["第 1 道神魂劫落下，承伤 999，余气血 0/100"],
+    })
+
+    assert "神魂劫凶险" in text
+    assert "天劫凶猛" not in text

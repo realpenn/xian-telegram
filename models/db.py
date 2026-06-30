@@ -49,8 +49,9 @@ CREATE TABLE IF NOT EXISTS characters (
 CREATE TABLE IF NOT EXISTS inventory (
     user_id   INTEGER NOT NULL,
     item_key  TEXT NOT NULL,
+    bound     INTEGER NOT NULL DEFAULT 0,
     qty       INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY (user_id, item_key)
+    PRIMARY KEY (user_id, item_key, bound)
 );
 CREATE TABLE IF NOT EXISTS character_skills (
     user_id    INTEGER NOT NULL,
@@ -270,6 +271,64 @@ CREATE TABLE IF NOT EXISTS callback_tokens (
     created_at   INTEGER NOT NULL,
     consumed_at  INTEGER
 );
+CREATE TABLE IF NOT EXISTS dao_paths (
+    user_id     INTEGER NOT NULL,
+    path_key    TEXT NOT NULL,
+    xp          INTEGER NOT NULL DEFAULT 0,
+    rank        INTEGER NOT NULL DEFAULT 0,
+    active      INTEGER NOT NULL DEFAULT 0,
+    unlocked_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, path_key)
+);
+CREATE TABLE IF NOT EXISTS path_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    path_key    TEXT,
+    event_type  TEXT NOT NULL,
+    amount      INTEGER NOT NULL DEFAULT 0,
+    created_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ascension (
+    user_id     INTEGER PRIMARY KEY,
+    level       INTEGER NOT NULL DEFAULT 0,
+    points      INTEGER NOT NULL DEFAULT 0,
+    spent_json  TEXT NOT NULL DEFAULT '{}',
+    updated_at  INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS weekly_activity (
+    user_id     INTEGER NOT NULL,
+    week        TEXT NOT NULL,
+    runs        INTEGER NOT NULL DEFAULT 0,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, week)
+);
+CREATE TABLE IF NOT EXISTS sect_outposts (
+    sect_id     INTEGER NOT NULL,
+    outpost_key TEXT NOT NULL,
+    score       INTEGER NOT NULL DEFAULT 0,
+    season      TEXT NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (sect_id, outpost_key)
+);
+CREATE TABLE IF NOT EXISTS pvp_season_rewards (
+    user_id     INTEGER NOT NULL,
+    season      TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    daohang     INTEGER NOT NULL DEFAULT 0,
+    claimed_at  INTEGER NOT NULL,
+    PRIMARY KEY (user_id, season)
+);
+CREATE TABLE IF NOT EXISTS market_listings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    seller_id   INTEGER NOT NULL,
+    item_key    TEXT NOT NULL,
+    qty         INTEGER NOT NULL,
+    price       INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'active',
+    buyer_id    INTEGER,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
 """
 
 
@@ -300,6 +359,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "characters", "current_mp", "INTEGER")
     await _ensure_column(_conn, "characters", "hp_at", "INTEGER")
     await _ensure_column(_conn, "characters", "mp_at", "INTEGER")
+    await _ensure_column(_conn, "characters", "daohang", "INTEGER NOT NULL DEFAULT 0")
     await _ensure_column(_conn, "world_boss", "message_id", "INTEGER")
     await _ensure_column(_conn, "world_boss", "cultivator_count", "INTEGER NOT NULL DEFAULT 1")
     await _ensure_column(_conn, "pvp_ratings", "reputation", "INTEGER NOT NULL DEFAULT 0")
@@ -325,6 +385,8 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "explore_runs", "event_choice", "TEXT")
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
+    await _migrate_inventory_bound(_conn)
+    await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()
     # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
     _read_conn = await aiosqlite.connect(db_path)
@@ -364,6 +426,48 @@ async def _ensure_column(conn, table: str, column: str, definition: str):
     await cur.close()
     if column not in columns:
         await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+async def _migrate_inventory_bound(conn):
+    cur = await conn.execute("PRAGMA table_info(inventory)")
+    columns = {row[1] for row in await cur.fetchall()}
+    await cur.close()
+    if "bound" in columns:
+        return
+    await conn.execute(
+        "CREATE TABLE inventory_new ("
+        "user_id INTEGER NOT NULL, "
+        "item_key TEXT NOT NULL, "
+        "bound INTEGER NOT NULL DEFAULT 0, "
+        "qty INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (user_id, item_key, bound))")
+    await conn.execute(
+        "INSERT INTO inventory_new(user_id, item_key, bound, qty) "
+        "SELECT user_id, item_key, 0, qty FROM inventory")
+    await conn.execute("DROP TABLE inventory")
+    await conn.execute("ALTER TABLE inventory_new RENAME TO inventory")
+
+
+async def _migrate_sect_outposts_pk(conn):
+    """旧 sect_outposts 主键为 (sect_id)，导致一个宗门只能持 1 个据点。
+    迁移为复合主键 (sect_id, outpost_key)，支持多据点并存。幂等可重入。"""
+    cur = await conn.execute("PRAGMA table_info(sect_outposts)")
+    info = await cur.fetchall()
+    await cur.close()
+    # pk 列（row[5]）：旧表仅 sect_id 为主键，outpost_key 的 pk==0 ⇒ 需迁移。
+    pk_of = {row[1]: row[5] for row in info}
+    if pk_of.get("outpost_key", 0) > 0:
+        return
+    await conn.execute(
+        "CREATE TABLE sect_outposts_new ("
+        "sect_id INTEGER NOT NULL, outpost_key TEXT NOT NULL, "
+        "score INTEGER NOT NULL DEFAULT 0, season TEXT NOT NULL, updated_at INTEGER NOT NULL, "
+        "PRIMARY KEY (sect_id, outpost_key))")
+    await conn.execute(
+        "INSERT INTO sect_outposts_new(sect_id, outpost_key, score, season, updated_at) "
+        "SELECT sect_id, outpost_key, score, season, updated_at FROM sect_outposts")
+    await conn.execute("DROP TABLE sect_outposts")
+    await conn.execute("ALTER TABLE sect_outposts_new RENAME TO sect_outposts")
 
 
 async def fetchone(sql, params=()):

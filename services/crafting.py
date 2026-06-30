@@ -8,22 +8,24 @@ import time
 from config.items import ITEMS, item_name
 from config.recipes import ACCELERATE_STONE_PER_MINUTE, RECIPES
 from models import db
-from services import activity, character, game_events
+from services import activity, character, dao_path, game_events
 
 
-def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
+def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None,
+                  quality_mult: float = 1.0) -> dict:
     rng = rng or random.Random()
     pool = [
         "atk_pct", "hp_pct", "df_pct", "lifesteal_pct", "reflect_pct",
         "initiative", "crit", "crit_resist", "pierce",
     ]
     rolls = 1 + int(root_bone >= 70) + int(prof >= 5)
+    quality_mult = max(1.0, float(quality_mult))   # 器修 forge_pct 放大词条品质
     affixes = {}
     for key in rng.sample(pool, min(rolls, len(pool))):
         if key.endswith("_pct"):
-            affixes[key] = round((rng.randint(3, 8) + prof * 0.5) / 100, 3)
+            affixes[key] = round((rng.randint(3, 8) + prof * 0.5) / 100 * quality_mult, 3)
         else:
-            affixes[key] = rng.randint(4, 12) + prof
+            affixes[key] = int(round((rng.randint(4, 12) + prof) * quality_mult))
     return affixes
 
 
@@ -73,6 +75,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
+        dao_bonus = await dao_path.active_bonuses(user_id)
+        forge_quality = 1.0 + float(dao_bonus.get("forge_pct", 0.0))
         for job in jobs:
             recipe = RECIPES[job["recipe_key"]]
             output = recipe["output"]
@@ -80,7 +84,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                 base_key = output["key"]
                 item = ITEMS[base_key]
                 prof = char["forge_prof"] if recipe["type"] == "forge" else char["alchemy_prof"]
-                affixes = _roll_affixes(base_key, char["root_bone"], prof)
+                quality = forge_quality if recipe["type"] == "forge" else 1.0
+                affixes = _roll_affixes(base_key, char["root_bone"], prof, quality_mult=quality)
                 await conn.execute(
                     "INSERT INTO item_instances(user_id, base_key, tier, affixes_json) "
                     "VALUES(?,?,?,?)",
@@ -89,8 +94,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                 collected.append({"kind": "equipment", "name": item_name(base_key)})
             else:
                 await conn.execute(
-                    "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-                    "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+                    "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+                    "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
                     (user_id, output["key"], output["qty"], output["qty"]))
                 collected.append({"kind": "item", "name": item_name(output["key"]), "qty": output["qty"]})
             column = "alchemy_prof" if recipe["type"] == "alchemy" else "forge_prof"
@@ -136,19 +141,14 @@ async def start_job(user_id: int, recipe_key: str, now: int = None) -> dict:
         if char["spirit_stone"] < recipe["stone"]:
             return {"status": "no_stone", "need": recipe["stone"], "have": char["spirit_stone"]}
         for key, qty in recipe["materials"].items():
-            cur = await conn.execute(
-                "SELECT qty FROM inventory WHERE user_id=? AND item_key=?", (user_id, key))
-            inv = await cur.fetchone()
-            await cur.close()
-            if not inv or inv["qty"] < qty:
-                return {"status": "no_material", "item": key, "need": qty, "have": inv["qty"] if inv else 0}
+            have = await character.item_qty_conn(conn, user_id, key)
+            if have < qty:
+                return {"status": "no_material", "item": key, "need": qty, "have": have}
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone - ? WHERE user_id=?",
             (recipe["stone"], user_id))
         for key, qty in recipe["materials"].items():
-            await conn.execute(
-                "UPDATE inventory SET qty = MAX(0, qty - ?) WHERE user_id=? AND item_key=?",
-                (qty, user_id, key))
+            await character.consume_item_conn(conn, user_id, key, qty)
         finish_at = now + recipe["seconds"]
         await conn.execute(
             "INSERT INTO crafting_jobs(user_id, craft_type, recipe_key, start_at, finish_at, status) "

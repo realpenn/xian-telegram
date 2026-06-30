@@ -369,8 +369,8 @@ async def _distribute(conn, boss_id: int, cfg: dict):
         drops = _split_drops_for_rank(cfg["drops"], idx, special_slots, n)
         for key, qty in drops.items():
             await conn.execute(
-                "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-                "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+                "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+                "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
                 (row["user_id"], key, qty, qty))
         rewards.append({"user_id": row["user_id"], "stone": stone, "drops": drops,
                         "rank": idx + 1})

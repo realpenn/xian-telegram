@@ -8,7 +8,7 @@ from config.events import ENCOUNTER_RATE, ENCOUNTERS
 from config.maps import MAPS
 from config.realms import realm_label
 from models import db
-from services import activity, character, game_events, settle
+from services import activity, character, game_events, sect_war, settle
 from services.combat import Combatant, simulate
 
 # 历练时长与遭遇密度按难度绑定（#20）：开局即定遭遇计划与时长，结算复用。
@@ -420,7 +420,9 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
         stone = int(rng.randint(*m["stone"]) * mult * reward_mult)
         cult = max(1, int(m["cult"] * _uniform(rng, 0.9, 1.1) * reward_mult)) * mult
         welfare = await character.sect_welfare(user_id)
-        drops = _roll_drops(m, rng, welfare["drop_pct"] + float(event_effect.get("drop_bonus", 0.0) or 0.0))
+        outpost = await sect_war.bonuses_for_user(user_id)
+        drop_pct = sect_war.total_drop_pct(welfare["drop_pct"], outpost)
+        drops = _roll_drops(m, rng, drop_pct + float(event_effect.get("drop_bonus", 0.0) or 0.0))
         if conn is not None:
             await character._grant_reward_conn(conn, user_id, stone, cult, drops)
             contribution = int(event_effect.get("contribution", 0) or 0)

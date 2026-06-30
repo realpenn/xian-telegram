@@ -148,8 +148,8 @@ async def redeem(user_id: int, item_key: str) -> dict:
             "UPDATE sect_members SET contribution = contribution - ? WHERE user_id=?",
             (good["contribution"], user_id))
         await conn.execute(
-            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
             (user_id, item_key, good["qty"], good["qty"]))
         return {"status": "ok", "item": item_name(item_key), "qty": good["qty"],
                 "cost": good["contribution"]}

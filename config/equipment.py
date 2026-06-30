@@ -9,11 +9,11 @@ ENHANCE_MAX_LEVEL = 10
 ENHANCE_PER_LEVEL = 0.08          # 每级提升装备「平加属性」8%（词条/战斗修正不放大）
 
 # 分解产出的器魂（按品阶），外加每级强化返还 1 枚。
-DECOMPOSE_QIHUN = {"凡": 1, "灵": 3, "宝": 6}
+DECOMPOSE_QIHUN = {"凡": 1, "灵": 3, "宝": 6, "玄": 10}
 QIHUN_KEY = "器魂"
 
-_REFORGE_BASE = {"凡": 60, "灵": 150, "宝": 300}
-_REFORGE_QIHUN = {"凡": 1, "灵": 2, "宝": 3}
+_REFORGE_BASE = {"凡": 60, "灵": 150, "宝": 300, "玄": 520}
+_REFORGE_QIHUN = {"凡": 1, "灵": 2, "宝": 3, "玄": 5}
 
 
 def enhance_cost(level: int) -> dict:

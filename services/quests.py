@@ -6,6 +6,7 @@ import time
 from config.items import item_name
 from config.quests import ACHIEVEMENTS, QUESTS
 from models import db
+from services import character
 
 
 def _day(ts: int) -> str:
@@ -69,8 +70,8 @@ async def _grant_reward_conn(conn, user_id: int, reward: dict):
         if qty <= 0:
             continue
         await conn.execute(
-            "INSERT INTO inventory(user_id, item_key, qty) VALUES(?,?,?) "
-            "ON CONFLICT(user_id, item_key) DO UPDATE SET qty = qty + ?",
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
             (user_id, key, qty, qty))
 
 

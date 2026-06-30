@@ -7,7 +7,7 @@ import time
 from config import realms as R
 from config.dungeons import DUNGEONS
 from config.items import ITEMS, item_name
-from services import activity, character, game_events, settle
+from services import activity, character, game_events, sect_war, settle
 from services.combat import Combatant, simulate
 from models import db
 
@@ -95,8 +95,9 @@ async def start(user_id: int, dungeon_key: str, now: int = None, rng=None) -> di
             (user_id, dungeon_key, _day(now)))
         runs = await cur.fetchone()
         await cur.close()
-        if runs and runs["runs"] >= DUNGEON_DAILY_LIMIT:
-            return {"status": "daily_done", "limit": DUNGEON_DAILY_LIMIT}
+        daily_limit = d.get("daily_limit", DUNGEON_DAILY_LIMIT)
+        if runs and runs["runs"] >= daily_limit:
+            return {"status": "daily_done", "limit": daily_limit}
         if stamina < total_cost:
             await conn.execute(
                 "UPDATE characters SET stamina=?, stamina_at=? WHERE user_id=?",
@@ -208,7 +209,8 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     if cleared:
         reward_factor = _uniform(rng, 4.0, 6.0) * (cleared / d["layers"])
         welfare = await character.sect_welfare(user_id)
-        raw_drops = _roll_drops(d, rng, welfare["drop_pct"])
+        outpost = await sect_war.bonuses_for_user(user_id)
+        raw_drops = _roll_drops(d, rng, sect_war.total_drop_pct(welfare["drop_pct"], outpost))
         for key, qty in raw_drops.items():
             if ITEMS.get(key, {}).get("type") == "equipment":
                 for _ in range(qty):

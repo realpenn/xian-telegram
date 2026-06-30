@@ -3,7 +3,7 @@ import pytest_asyncio
 
 from config import realms as R
 from models import db
-from services import character, settle
+from services import ascension, character, settle
 
 
 @pytest_asyncio.fixture
@@ -21,6 +21,15 @@ def test_overflow_to_daohang_full_huashen():
 
     assert kept == cost
     assert daohang == 300
+
+
+def test_overflow_split_full_huashen_gives_daohang_and_ascension_points():
+    cost = R.advance_cost(4, 3)
+    kept, daohang, asc_pts = settle.overflow_split(4, 3, cost, 1000)
+
+    assert kept == cost
+    assert daohang == 300
+    assert asc_pts == 200
 
 
 def test_overflow_to_daohang_yuanying_cap_transition():
@@ -49,6 +58,7 @@ async def test_collect_seclusion_converts_huashen_cap_overflow(temp_db):
     await character.start_seclusion(uid, now=1000)
     res = await character.collect_seclusion(uid, now=1000 + 3600)
     row = await db.fetchone("SELECT cultivation, daohang FROM characters WHERE user_id=?", (uid,))
+    asc = await ascension.get(uid)
     event = await db.fetchone(
         "SELECT event_type, amount FROM path_events WHERE user_id=? AND event_type='overflow'",
         (uid,))
@@ -58,6 +68,8 @@ async def test_collect_seclusion_converts_huashen_cap_overflow(temp_db):
     assert res["daohang"] > 0
     assert row["cultivation"] == cost
     assert row["daohang"] == res["daohang"]
+    assert asc["points"] == res["ascension"]
+    assert asc["points"] > 0
     assert event["amount"] == res["daohang"]
 
 
@@ -72,8 +84,10 @@ async def test_touch_activity_auto_collect_converts_overflow(temp_db):
 
     res = await character.touch_activity(uid, "auto", now=1000 + 7200)
     row = await db.fetchone("SELECT cultivation, daohang FROM characters WHERE user_id=?", (uid,))
+    asc = await ascension.get(uid)
 
     assert res["status"] == "ok"
     assert res["auto_cultivation"] > 0
     assert row["cultivation"] == cost
     assert row["daohang"] > 0
+    assert asc["points"] > 0

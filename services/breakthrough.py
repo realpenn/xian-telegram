@@ -15,6 +15,7 @@ from config.realms import (BIG_BREAKTHROUGH, advance_cost, is_big_breakthrough,
 from models import db
 from services import game_events
 from services import character as character_service
+from services import dao_path
 
 FAIL_CULT_LOSS = 0.30
 UNSTABLE_SECONDS = 6 * 3600
@@ -91,6 +92,7 @@ def _tribulation_choices(target_realm: int) -> list[dict]:
 
 def _tribulation_status(row) -> dict:
     return {"status": "tribulation_choice", "tribulation": True,
+            "target_realm": row["target_realm"],
             "thunder_index": row["thunder_index"], "total": 3,
             "hp": row["hp"], "choices": _tribulation_choices(row["target_realm"]),
             "tribulation_log": json.loads(row["log_json"] or "[]")}
@@ -131,7 +133,10 @@ async def try_advance(user_id: int, now: int = None) -> dict:
                 return {"status": "need_pill", "pill": pill}
             await character_service.consume_item_conn(conn, user_id, pill, 1)
             mods = await _breakthrough_mods(conn, user_id)
-            rate = big_success_rate(char["realm"], char["root_bone"], mods["rate"])
+            # 丹修道途 alchemy_pct 直接加成大突破成功率（口径同 balance_sim）。
+            dao_bonus = await dao_path.active_bonuses(user_id)
+            pill_bonus = mods["rate"] + float(dao_bonus.get("alchemy_pct", 0.0))
+            rate = big_success_rate(char["realm"], char["root_bone"], pill_bonus)
             trib = BIG_BREAKTHROUGH[target]["tribulation"]
             if random.random() >= rate:
                 return await _fail(conn, user_id, char["cultivation"], rate, trib, now=now)

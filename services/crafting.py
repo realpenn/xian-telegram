@@ -8,22 +8,24 @@ import time
 from config.items import ITEMS, item_name
 from config.recipes import ACCELERATE_STONE_PER_MINUTE, RECIPES
 from models import db
-from services import activity, character, game_events
+from services import activity, character, dao_path, game_events
 
 
-def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None) -> dict:
+def _roll_affixes(base_key: str, root_bone: int, prof: int, rng=None,
+                  quality_mult: float = 1.0) -> dict:
     rng = rng or random.Random()
     pool = [
         "atk_pct", "hp_pct", "df_pct", "lifesteal_pct", "reflect_pct",
         "initiative", "crit", "crit_resist", "pierce",
     ]
     rolls = 1 + int(root_bone >= 70) + int(prof >= 5)
+    quality_mult = max(1.0, float(quality_mult))   # 器修 forge_pct 放大词条品质
     affixes = {}
     for key in rng.sample(pool, min(rolls, len(pool))):
         if key.endswith("_pct"):
-            affixes[key] = round((rng.randint(3, 8) + prof * 0.5) / 100, 3)
+            affixes[key] = round((rng.randint(3, 8) + prof * 0.5) / 100 * quality_mult, 3)
         else:
-            affixes[key] = rng.randint(4, 12) + prof
+            affixes[key] = int(round((rng.randint(4, 12) + prof) * quality_mult))
     return affixes
 
 
@@ -73,6 +75,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
         cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
+        dao_bonus = await dao_path.active_bonuses(user_id)
+        forge_quality = 1.0 + float(dao_bonus.get("forge_pct", 0.0))
         for job in jobs:
             recipe = RECIPES[job["recipe_key"]]
             output = recipe["output"]
@@ -80,7 +84,8 @@ async def collect_ready(user_id: int, now: int = None) -> list:
                 base_key = output["key"]
                 item = ITEMS[base_key]
                 prof = char["forge_prof"] if recipe["type"] == "forge" else char["alchemy_prof"]
-                affixes = _roll_affixes(base_key, char["root_bone"], prof)
+                quality = forge_quality if recipe["type"] == "forge" else 1.0
+                affixes = _roll_affixes(base_key, char["root_bone"], prof, quality_mult=quality)
                 await conn.execute(
                     "INSERT INTO item_instances(user_id, base_key, tier, affixes_json) "
                     "VALUES(?,?,?,?)",

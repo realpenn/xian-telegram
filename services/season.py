@@ -37,3 +37,20 @@ async def claim(user_id: int, now: int = None) -> dict:
             "VALUES(?,?,?,?,?)",
             (user_id, season, SEASON_TITLE, SEASON_DAOHANG_REWARD, now))
         return {"status": "ok", "title": SEASON_TITLE, "daohang": SEASON_DAOHANG_REWARD}
+
+
+async def settle_monthly(now: int = None) -> list:
+    """月末赛季结算：仅向参与过天梯（有胜负记录）的玩家发放绑定称号 + 道行。
+
+    幂等：复用 claim 的 `pvp_season_rewards` 唯一键，重复结算不重复发放。
+    由 scheduler 在月末触发（见 bot/app.py）。
+    """
+    now = int(time.time()) if now is None else now
+    rows = await db.fetchall(
+        "SELECT user_id FROM pvp_ratings WHERE wins + losses > 0")
+    granted = []
+    for row in rows:
+        res = await claim(row["user_id"], now)
+        if res.get("status") == "ok":
+            granted.append(row["user_id"])
+    return granted

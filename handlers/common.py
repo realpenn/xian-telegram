@@ -94,7 +94,12 @@ def main_menu() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🎒 储物袋", callback_data="nav:bag")],
         [InlineKeyboardButton(text="📜 悬赏", callback_data="nav:quest"),
          InlineKeyboardButton(text="⛩️ 宗门", callback_data="nav:sect")],
-        [InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
+        [InlineKeyboardButton(text="🧭 道途", callback_data="nav:path"),
+         InlineKeyboardButton(text="🌌 飞升", callback_data="nav:ascension")],
+        [InlineKeyboardButton(text="🗓️ 活动", callback_data="nav:weekly"),
+         InlineKeyboardButton(text="🏷️ 坊市", callback_data="nav:market")],
+        [InlineKeyboardButton(text="⚔️ 宗门战", callback_data="nav:sectwar"),
+         InlineKeyboardButton(text="📖 指南", callback_data="nav:help")],
     ])
 
 

@@ -16,23 +16,40 @@ SECLUSION_STAGE_SECONDS = 24 * 3600
 CULTIVATION_SCALE = 1_000_000
 DAOHANG_FULL_REALM_RATE = 0.30
 DAOHANG_PRE_CAP_RATE = 0.15
+# 化神圆满溢出修为额外转飞升点（M3）；与道行并行分流，合计 50% 转化、50% sink 损耗，无双倍发放。
+ASCENSION_FULL_REALM_RATE = 0.20
 
 
-def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int]:
-    """满级/准满级溢出修为转道行，返回 (保留修为, 获得道行)。"""
+def overflow_split(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int, int]:
+    """满级/准满级溢出修为分流，返回 (保留修为, 道行, 飞升点)。
+
+    - 化神圆满：cultivation 封顶 advance_cost；越界 ×30%→道行、×20%→飞升点。
+    - 元婴圆满未化神突破：越界 ×15%→道行，不产飞升点（飞升点要求化神圆满）。
+    - 其它：原样累加，无转换。
+    """
     cur_cult = max(0, int(cur_cult))
     gain = max(0, int(gain))
     total = cur_cult + gain
     if realm == len(R.REALM_NAMES) - 1 and stage == R.num_stages(realm) - 1:
         cap = R.advance_cost(realm, stage)
         overflow = max(0, total - cap)
-        return min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE)
+        return (min(total, cap), int(overflow * DAOHANG_FULL_REALM_RATE),
+                int(overflow * ASCENSION_FULL_REALM_RATE))
     if realm == len(R.REALM_NAMES) - 2 and stage == R.num_stages(realm) - 1:
         cap = R.advance_cost(realm, stage)
         if cur_cult >= cap:
             overflow = max(0, total - cap)
-            return min(total, cap), int(overflow * DAOHANG_PRE_CAP_RATE)
-    return total, 0
+            return min(total, cap), int(overflow * DAOHANG_PRE_CAP_RATE), 0
+    return total, 0, 0
+
+
+def overflow_to_daohang(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int]:
+    """满级/准满级溢出修为转道行，返回 (保留修为, 获得道行)。
+
+    兼容包装：等价于 overflow_split 的前两元（不含飞升点）。新代码应直接用 overflow_split。
+    """
+    kept, daohang, _ = overflow_split(realm, stage, cur_cult, gain)
+    return kept, daohang
 
 
 def regen_stamina(stamina: int, stamina_at: int, cap: int, now: int):

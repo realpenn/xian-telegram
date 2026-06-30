@@ -51,6 +51,7 @@ ITEMS = {
              "tier": "玄", "bonus": {"hp": 1800, "df": 320}, "tribulation_shield": 220},
     "太虚佩": {"name": "太虚佩", "type": "equipment", "slot": "accessory",
              "tier": "玄", "bonus": {"mp": 480, "spd": 70}, "breakthrough_rate": 0.04},
+    "化神丹方": {"name": "化神丹方", "type": "recipe", "recipe": "huashen_pill"},
     "陨星剑图纸": {"name": "陨星剑图纸", "type": "recipe", "recipe": "forge_huashen_sword"},
     "幽都甲图纸": {"name": "幽都甲图纸", "type": "recipe", "recipe": "forge_huashen_armor"},
     "太虚佩图纸": {"name": "太虚佩图纸", "type": "recipe", "recipe": "forge_huashen_accessory"},

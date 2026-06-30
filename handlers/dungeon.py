@@ -34,10 +34,11 @@ async def render_dungeon(user_id: int):
     rows = []
     v = await character.vitals(char)
     lines = ["🏯 秘境", vitals_line(v),
-             f"每日每处秘境最多可入 {dungeon.DUNGEON_DAILY_LIMIT} 次。"]
+             "各秘境每日限次不同，见下方条目。"]
     for key, d in DUNGEONS.items():
         state = "可入" if char.realm >= d["realm"] else "未解锁"
-        lines.append(f"{d['name']}：{d['layers']} 层，精力 {d['stamina']}，约30分钟（{state}）")
+        limit = d.get("daily_limit", dungeon.DUNGEON_DAILY_LIMIT)
+        lines.append(f"{d['name']}：{d['layers']} 层，精力 {d['stamina']}，每日 {limit} 次，约30分钟（{state}）")
         if char.realm >= d["realm"]:
             rows.append([InlineKeyboardButton(
                 text=f"进入 {d['name']}",

@@ -12,11 +12,23 @@ def _week(now: int) -> str:
     return time.strftime("%Y-%W", time.localtime(now))
 
 
-async def run(user_id: int, theme_key: str = "tianmo", now: int = None) -> dict:
+def current_theme_key(now: int) -> str:
+    """按周确定性轮换：每周仅开放一个主题（防同时刷三种材料肝度失控）。"""
+    keys = list(CFG.WEEKLY_THEMES)
+    week_no = int(time.strftime("%W", time.localtime(now)))
+    return keys[week_no % len(keys)]
+
+
+async def run(user_id: int, theme_key: str = None, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
-    theme = CFG.WEEKLY_THEMES.get(theme_key)
-    if not theme:
+    if theme_key is not None and theme_key not in CFG.WEEKLY_THEMES:
         return {"status": "bad_theme"}
+    open_key = current_theme_key(now)
+    theme_key = theme_key or open_key
+    if theme_key != open_key:
+        return {"status": "closed", "open": open_key,
+                "open_name": CFG.WEEKLY_THEMES[open_key]["name"]}
+    theme = CFG.WEEKLY_THEMES[theme_key]
     week = _week(now)
     async with db.transaction() as conn:
         cur = await conn.execute("SELECT stamina FROM characters WHERE user_id=?", (user_id,))

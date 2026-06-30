@@ -303,11 +303,12 @@ CREATE TABLE IF NOT EXISTS weekly_activity (
     PRIMARY KEY (user_id, week)
 );
 CREATE TABLE IF NOT EXISTS sect_outposts (
-    sect_id     INTEGER PRIMARY KEY,
+    sect_id     INTEGER NOT NULL,
     outpost_key TEXT NOT NULL,
     score       INTEGER NOT NULL DEFAULT 0,
     season      TEXT NOT NULL,
-    updated_at  INTEGER NOT NULL
+    updated_at  INTEGER NOT NULL,
+    PRIMARY KEY (sect_id, outpost_key)
 );
 CREATE TABLE IF NOT EXISTS pvp_season_rewards (
     user_id     INTEGER NOT NULL,
@@ -385,6 +386,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
     await _migrate_inventory_bound(_conn)
+    await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()
     # 独立只读连接：WAL 下读取已提交快照，不参与写锁，杜绝脏读与读-写死锁。
     _read_conn = await aiosqlite.connect(db_path)
@@ -444,6 +446,28 @@ async def _migrate_inventory_bound(conn):
         "SELECT user_id, item_key, 0, qty FROM inventory")
     await conn.execute("DROP TABLE inventory")
     await conn.execute("ALTER TABLE inventory_new RENAME TO inventory")
+
+
+async def _migrate_sect_outposts_pk(conn):
+    """旧 sect_outposts 主键为 (sect_id)，导致一个宗门只能持 1 个据点。
+    迁移为复合主键 (sect_id, outpost_key)，支持多据点并存。幂等可重入。"""
+    cur = await conn.execute("PRAGMA table_info(sect_outposts)")
+    info = await cur.fetchall()
+    await cur.close()
+    # pk 列（row[5]）：旧表仅 sect_id 为主键，outpost_key 的 pk==0 ⇒ 需迁移。
+    pk_of = {row[1]: row[5] for row in info}
+    if pk_of.get("outpost_key", 0) > 0:
+        return
+    await conn.execute(
+        "CREATE TABLE sect_outposts_new ("
+        "sect_id INTEGER NOT NULL, outpost_key TEXT NOT NULL, "
+        "score INTEGER NOT NULL DEFAULT 0, season TEXT NOT NULL, updated_at INTEGER NOT NULL, "
+        "PRIMARY KEY (sect_id, outpost_key))")
+    await conn.execute(
+        "INSERT INTO sect_outposts_new(sect_id, outpost_key, score, season, updated_at) "
+        "SELECT sect_id, outpost_key, score, season, updated_at FROM sect_outposts")
+    await conn.execute("DROP TABLE sect_outposts")
+    await conn.execute("ALTER TABLE sect_outposts_new RENAME TO sect_outposts")
 
 
 async def fetchone(sql, params=()):

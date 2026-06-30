@@ -233,8 +233,9 @@ def report() -> None:
     for dkey, d in DUNGEONS.items():
         r = d["realm"]
         last = R.num_stages(r) - 1
-        e = dungeon_clear_fraction(r, 0, dkey)
-        f = dungeon_clear_fraction(r, last, dkey)
+        profile = HUASHEN_GEARED if r == 4 else GEARED
+        e = dungeon_clear_fraction(r, 0, dkey, profile=profile)
+        f = dungeon_clear_fraction(r, last, dkey, profile=profile)
         print(f"  {d['name']:<10}(r{r}) 入门 {e*100:5.1f}% {_bar(e):<20} 圆满 {f*100:5.1f}%")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")

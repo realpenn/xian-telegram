@@ -12,7 +12,8 @@ def test_taixu_dungeon_config_complete():
     assert d["name"] == "太虚天门"
     assert d["realm"] == 4
     assert d["layers"] == 5
-    assert d["stamina"] <= R.STAMINA_CAP[4] // 3
+    assert d["stamina"] == 60
+    assert d["daily_limit"] == 2
     assert d["entry_stone"] == 1800
     drops = {row[0] for row in d["drops"]}
     assert {"星陨砂", "幽都魂晶", "天外残玉", "转修令"} <= drops
@@ -52,7 +53,7 @@ def test_taixu_entry_and_full_clear_fraction_targets():
     entry = B.dungeon_clear_fraction(4, 0, "taixu", profile=B.HUASHEN_GEARED, n=80)
     full = B.dungeon_clear_fraction(4, R.num_stages(4) - 1, "taixu", profile=B.HUASHEN_GEARED, n=80)
 
-    assert 0.35 <= entry <= 0.80
+    assert 0.40 <= entry <= 0.70
     assert full >= 0.95
 
 

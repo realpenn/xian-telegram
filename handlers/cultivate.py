@@ -63,12 +63,14 @@ def _bt_text(res: dict) -> str:
     if s == "missing":
         return NEED_START
     if s == "at_cap":
-        return "道友已臻元婴圆满，乃此界之绝巅（化神之境，留待来日开启）。"
+        return "道友已臻化神圆满，修为封顶；后续溢出将转为道行与飞升点，可继续打磨根基。"
     if s == "need_pill":
         return f"大境界突破需「{res['pill']}」护道，道友尚缺此物。"
     if s == "tribulation_choice":
         tail = "\n".join(res.get("last_log") or res.get("tribulation_log") or [])
-        prefix = f"⚡ 天劫未尽，第 {res['thunder_index']}/{res.get('total', 3)} 道雷将落。"
+        trial = "神魂劫" if res.get("target_realm") == 4 else "天劫"
+        fall = "魔念翻涌" if res.get("target_realm") == 4 else "雷将落"
+        prefix = f"⚡ {trial}未尽，第 {res['thunder_index']}/{res.get('total', 3)} 段{fall}。"
         hp = f"\n当前气血：{res['hp']}" if res.get("hp") is not None else ""
         return "\n".join(line for line in [prefix + hp, tail, "请选择应对。"] if line)
     if s == "need_item":
@@ -82,11 +84,17 @@ def _bt_text(res: dict) -> str:
     if s == "big_success":
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
         if res["tribulation"]:
+            trial = "神魂劫" if "神魂劫" in tail else "天劫"
+            if trial == "神魂劫":
+                return f"🌀 神魂劫已尽，心魔归寂——道友破妄凝神，臻至 {res['label']}！{tail}"
             return f"⚡ 天劫加身，雷光淬体——道友力扛三道天雷，破境而出，臻至 {res['label']}！{tail}"
         return f"✨ 灵气灌顶，道友冲破桎梏，迈入 {res['label']}！"
     if s == "big_fail":
-        head = "⚡ 天劫凶猛" if res["tribulation"] else "✗ 冲关受阻"
         tail = "\n" + "\n".join(res.get("tribulation_log", [])) if res.get("tribulation_log") else ""
+        if res["tribulation"]:
+            head = "🌀 神魂劫凶险" if "神魂劫" in tail else "⚡ 天劫凶猛"
+        else:
+            head = "✗ 冲关受阻"
         return (
             f"{head}，道友未能破境，道基不稳（修为 −{res['loss']}，"
             f"法身六维暂降），所幸未曾跌境。来日再战。{tail}"

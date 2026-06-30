@@ -4,8 +4,8 @@
 > spec 负责"做什么 / 为什么"，本目录负责"按什么顺序、改哪些文件、验收标准是什么"。
 > 实施前如需调整设计，先改 `spec-v2.md`，再据此更新本目录。
 
-基线：当前 `main` / v0.1.5，`python -m pytest` **146 passed**（2026-06-29 实测）。
-所有计划的总验收前提：**新增内容不破坏现存 146 个测试**。
+基线：当前 `feat/v2-execution-plans`，`uv run --with-requirements requirements.txt python -m pytest` **207 passed**（2026-06-30 实测）。
+所有计划的总验收前提：**新增内容不破坏现存 207 个测试**。
 
 ---
 

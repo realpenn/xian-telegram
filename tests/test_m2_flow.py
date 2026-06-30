@@ -232,7 +232,8 @@ def test_dungeons_cover_each_realm_with_daily_stamina_budget():
 
     for d in DUNGEONS.values():
         realm = d["realm"]
-        assert d["stamina"] == R.STAMINA_CAP[realm] // dungeon.DUNGEON_DAILY_LIMIT
+        daily_limit = d.get("daily_limit", dungeon.DUNGEON_DAILY_LIMIT)
+        assert d["stamina"] * daily_limit <= R.STAMINA_CAP[realm]
         assert d["cult"] > 0
         assert d["stone"][0] > 0
 

@@ -336,6 +336,12 @@ CREATE TABLE IF NOT EXISTS market_listings (
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS market_broadcast_state (
+    chat_id          INTEGER PRIMARY KEY,
+    last_notified_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_market_listings_notify
+ON market_listings(status, created_at, id);
 """
 
 

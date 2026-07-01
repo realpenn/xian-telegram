@@ -20,7 +20,7 @@ def test_overflow_to_daohang_full_huashen():
     kept, daohang = settle.overflow_to_daohang(4, 3, cost, 1000)
 
     assert kept == cost
-    assert daohang == 300
+    assert daohang == int(1000 * settle.DAOHANG_FULL_REALM_RATE)  # 80 @ 0.08
 
 
 def test_overflow_split_full_huashen_gives_daohang_and_ascension_points():
@@ -28,8 +28,8 @@ def test_overflow_split_full_huashen_gives_daohang_and_ascension_points():
     kept, daohang, asc_pts = settle.overflow_split(4, 3, cost, 1000)
 
     assert kept == cost
-    assert daohang == 300
-    assert asc_pts == 200
+    assert daohang == int(1000 * settle.DAOHANG_FULL_REALM_RATE)  # 80 @ 0.08
+    assert asc_pts == 200  # 飞升点转化率不变（下游有硬上限）
 
 
 def test_overflow_to_daohang_yuanying_cap_transition():
@@ -37,7 +37,7 @@ def test_overflow_to_daohang_yuanying_cap_transition():
     kept, daohang = settle.overflow_to_daohang(3, 3, cost, 1000)
 
     assert kept == cost
-    assert daohang == 150
+    assert daohang == int(1000 * settle.DAOHANG_PRE_CAP_RATE)  # 30 @ 0.03
 
 
 def test_overflow_to_daohang_other_progress_is_unchanged():
@@ -91,3 +91,56 @@ async def test_touch_activity_auto_collect_converts_overflow(temp_db):
     assert row["cultivation"] == cost
     assert row["daohang"] > 0
     assert asc["points"] > 0
+
+
+@pytest.mark.asyncio
+async def test_overflow_daohang_weekly_cap(temp_db):
+    uid = 9403
+    cost = R.advance_cost(4, 3)
+    await character.create(uid, "capd")
+    await character.set_progress(uid, 4, 3, cost)
+    await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (uid,))
+
+    # 一次满离线收功，溢出道行远超周上限 → 封顶
+    await character.start_seclusion(uid, now=1000)
+    res = await character.collect_seclusion(uid, now=1000 + 12 * 3600)
+    assert res["daohang"] == settle.OVERFLOW_DAOHANG_WEEKLY_CAP
+
+    # 同周再次收功不再入账道行（额度已用尽）
+    await character.start_seclusion(uid, now=1000 + 12 * 3600)
+    res2 = await character.collect_seclusion(uid, now=1000 + 24 * 3600)
+    assert res2["daohang"] == 0
+    row = await db.fetchone("SELECT daohang FROM characters WHERE user_id=?", (uid,))
+    assert row["daohang"] == settle.OVERFLOW_DAOHANG_WEEKLY_CAP
+
+
+@pytest.mark.asyncio
+async def test_refine_sink_consumes_daohang_within_clamp(temp_db):
+    from config import dao_paths as DCFG
+    from services import dao_path
+
+    uid = 9404
+    await character.create(uid, "refiner")
+    await character.set_progress(uid, 3, 0, 0)  # 元婴，够解锁道途
+    await db.execute("UPDATE characters SET daohang=100000 WHERE user_id=?", (uid,))
+    await dao_path.unlock(uid, "sword")
+
+    before = await dao_path.active_bonuses(uid)
+    stat = DCFG.REFINE_STATS["sword"]  # crit_pct（剑修未触顶维度）
+    res = await dao_path.refine(uid, "sword")
+    assert res["status"] == "refine_ok"
+    assert res["level"] == 1
+    assert res["cost"] == DCFG.refine_cost(0)
+    after = await dao_path.active_bonuses(uid)
+    # 只强化淬炼维度，主攻伐维度不变
+    assert after[stat] == round(before[stat] + DCFG.REFINE_PER_LEVEL_PCT, 4)
+    assert after["atk_pct"] == before["atk_pct"]
+    row = await db.fetchone("SELECT daohang FROM characters WHERE user_id=?", (uid,))
+    assert row["daohang"] == 100000 - DCFG.refine_cost(0)
+
+    # 淬炼封顶后不再消耗道行
+    for _ in range(DCFG.REFINE_MAX_LEVEL):
+        await dao_path.refine(uid, "sword")
+    maxed = await dao_path.refine(uid, "sword")
+    assert maxed["status"] == "refine_max"
+    assert maxed["level"] == DCFG.REFINE_MAX_LEVEL

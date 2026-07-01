@@ -33,11 +33,15 @@ async def render_path(user_id: int):
         unlocked = {p["path_key"] for p in paths}
         for p in paths:
             mark = "（当前）" if p["active"] else ""
-            lines.append(f"{p['name']}·{p['rank_name']}{mark}：{_bonus_text(p['bonuses'])}")
+            refine = f"·淬炼{p['refine']}" if p.get("refine") else ""
+            lines.append(f"{p['name']}·{p['rank_name']}{refine}{mark}：{_bonus_text(p['bonuses'])}")
             if p["active"]:
                 buttons.append(InlineKeyboardButton(
                     text=f"升阶 {p['name']}",
                     callback_data=await action_callback_data(user_id, f"path:rank:{p['path_key']}")))
+                buttons.append(InlineKeyboardButton(
+                    text=f"淬炼 {p['name']}",
+                    callback_data=await action_callback_data(user_id, f"path:refine:{p['path_key']}")))
             else:
                 buttons.append(InlineKeyboardButton(
                     text=f"转修 {p['name']}",
@@ -65,6 +69,10 @@ def _result_text(res: dict) -> str:
         return f"若要改修 {res['path']}，需使用转修。"
     if s == "ok" and "rank_name" in res:
         return f"{res['path']} 升至 {res['rank_name']}。"
+    if s == "refine_ok":
+        return f"{res['path']} 淬炼至第 {res['level']} 层（耗道行 {res['cost']}）。"
+    if s == "refine_max":
+        return "此道途淬炼已臻圆满。"
     if s == "ok":
         return f"转修成功，当前道途：{res['path']}（耗灵石 {res['cost']}）。"
     if s == "locked":
@@ -121,6 +129,8 @@ async def cb_path_action(callback: CallbackQuery):
         res = await dao_path.unlock(callback.from_user.id, key)
     elif op == "rank":
         res = await dao_path.rank_up(callback.from_user.id, key)
+    elif op == "refine":
+        res = await dao_path.refine(callback.from_user.id, key)
     else:
         res = await dao_path.switch(callback.from_user.id, key)
     await show(callback, _result_text(res), section_back_markup("↩️ 返回道途", "nav:path"))

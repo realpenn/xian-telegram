@@ -6,8 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import ascension as CFG
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import ascension, character
 
 router = Router()
@@ -37,7 +38,7 @@ async def render_ascension(user_id: int):
             rows.append([InlineKeyboardButton(
                 text=f"升级 {name}",
                 callback_data=await action_callback_data(user_id, f"asc:up:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -94,5 +95,5 @@ async def cb_ascension_action(callback: CallbackQuery):
         res = await ascension.trial(callback.from_user.id)
     else:
         res = await ascension.upgrade_passive(callback.from_user.id, action.rsplit(":", 1)[1])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回飞升", "nav:ascension"))
     await callback.answer()

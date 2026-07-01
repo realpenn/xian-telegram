@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import ITEMS, item_name, sell_price
 from config.shop import goods_for_realm, shop_price
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, shop
 
 router = Router()
@@ -62,10 +63,7 @@ def _stamina_button_text(offer: dict) -> str:
 
 def _back_markup() -> InlineKeyboardMarkup:
     """交易结果页的去处：回商店首页或回主菜单。"""
-    return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="↩️ 返回商店", callback_data="nav:shop"),
-        InlineKeyboardButton(text="🏯 主菜单", callback_data="nav:menu"),
-    ]])
+    return section_back_markup("↩️ 返回商店", "nav:shop")
 
 
 async def render_shop(user_id: int, now: int = None):
@@ -98,7 +96,7 @@ async def render_shop(user_id: int, now: int = None):
     if sellable:
         entries.append(InlineKeyboardButton(text="卖物品", callback_data="shop:cat:sell"))
     rows += [entries[i:i + 2] for i in range(0, len(entries), 2)]
-    rows.append([InlineKeyboardButton(text="🏯 返回主菜单", callback_data="nav:menu")])
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 

@@ -9,8 +9,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import item_name
 from config.recipes import RECIPES
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, crafting
 
 router = Router()
@@ -52,7 +53,7 @@ async def render_craft(user_id: int):
             rows.append([InlineKeyboardButton(
                 text=f"{recipe['name']}（{mats} / 🪙{recipe['stone']}）",
                 callback_data=await action_callback_data(user_id, f"craft:start:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -107,7 +108,7 @@ async def cb_craft_start(callback: CallbackQuery):
     if not action or not action.startswith("craft:start:"):
         return
     res = await crafting.start_job(callback.from_user.id, action.split(":", 2)[2])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回炼制", "nav:craft"))
     await callback.answer()
 
 
@@ -118,5 +119,5 @@ async def cb_craft_fast(callback: CallbackQuery):
     if await consume_action_callback(callback) != "craft:fast":
         return
     res = await crafting.accelerate(callback.from_user.id)
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回炼制", "nav:craft"))
     await callback.answer()

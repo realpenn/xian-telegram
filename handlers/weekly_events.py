@@ -9,8 +9,9 @@ import time
 
 from config import weekly_events as CFG
 from config.items import item_name
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, weekly_events
 
 router = Router()
@@ -37,7 +38,7 @@ async def render_weekly(user_id: int):
         rows.append([InlineKeyboardButton(
             text=f"兑换 {offer['name']}（{offer['material_cost']} 材料）",
             callback_data=await action_callback_data(user_id, f"weekly:shop:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -90,7 +91,7 @@ async def cb_weekly_run(callback: CallbackQuery):
     if not action or not action.startswith("weekly:run:"):
         return
     res = await weekly_events.run(callback.from_user.id, action.rsplit(":", 1)[1])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回活动", "nav:weekly"))
     await callback.answer()
 
 
@@ -102,5 +103,5 @@ async def cb_weekly_shop(callback: CallbackQuery):
     if not action or not action.startswith("weekly:shop:"):
         return
     res = await weekly_events.exchange(callback.from_user.id, action.rsplit(":", 1)[1])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回活动", "nav:weekly"))
     await callback.answer()

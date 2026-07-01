@@ -6,8 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import is_usable, item_name
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, items as item_service
 
 router = Router()
@@ -36,7 +37,7 @@ async def render_bag(user_id: int):
             lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}）")
     if not inv and not instances:
         lines.append("（空空如也，去历练寻些机缘吧）")
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -98,5 +99,5 @@ async def cb_use_item(callback: CallbackQuery):
     if not action or not action.startswith("bag:use:"):
         return
     res = await item_service.use(callback.from_user.id, action.split(":", 2)[2])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回储物袋", "nav:bag"))
     await callback.answer()

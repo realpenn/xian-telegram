@@ -5,8 +5,9 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, quests
 
 router = Router()
@@ -31,7 +32,7 @@ async def render_quest(user_id: int):
         lines.append(f"🏅 成就：{shown}")
     else:
         lines.append("🏅 成就：暂无")
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -70,5 +71,5 @@ async def cb_quest_claim(callback: CallbackQuery):
     if not action or not action.startswith("quest:claim:"):
         return
     res = await quests.claim(callback.from_user.id, action.rsplit(":", 1)[1])
-    await show(callback, _claim_text(res), main_menu())
+    await show(callback, _claim_text(res), section_back_markup("↩️ 返回悬赏", "nav:quest"))
     await callback.answer()

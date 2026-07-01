@@ -6,8 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import dao_paths as CFG
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, dao_path
 
 router = Router()
@@ -50,7 +51,7 @@ async def render_path(user_id: int):
         rows.append([InlineKeyboardButton(
             text=f"选择 {cfg['name']}",
             callback_data=await action_callback_data(user_id, f"path:unlock:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -120,5 +121,5 @@ async def cb_path_action(callback: CallbackQuery):
         res = await dao_path.rank_up(callback.from_user.id, key)
     else:
         res = await dao_path.switch(callback.from_user.id, key)
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回道途", "nav:path"))
     await callback.answer()

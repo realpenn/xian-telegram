@@ -8,8 +8,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config.items import ITEMS, equipment_slot, item_name
 from config.equipment import QIHUN_KEY
 from config.skills import MIND_SLOT, skill_name
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, equipment
 
 router = Router()
@@ -74,7 +75,7 @@ async def render_skills(user_id: int):
     if page_buttons:
         lines.append("残页已足，可领悟新功法。")
         rows += page_buttons
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -144,7 +145,7 @@ async def _eq_op(callback: CallbackQuery, prefix: str, fn):
     if not action or not action.startswith(prefix):
         return
     res = await fn(callback.from_user.id, int(action.rsplit(":", 1)[1]))
-    await show(callback, _eq_text(res), main_menu())
+    await show(callback, _eq_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
     await callback.answer()
 
 
@@ -171,7 +172,7 @@ async def cb_equip(callback: CallbackQuery):
     if not action or not action.startswith("equip:"):
         return
     res = await character.equip_instance(callback.from_user.id, int(action[6:]))
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
     await callback.answer()
 
 
@@ -183,5 +184,5 @@ async def cb_learn(callback: CallbackQuery):
     if not action or not action.startswith("learn:"):
         return
     res = await character.learn_skill_from_pages(callback.from_user.id, action[6:])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回功法", "nav:skills"))
     await callback.answer()

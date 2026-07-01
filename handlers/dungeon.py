@@ -7,9 +7,10 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.dungeons import DUNGEONS
 from config.items import item_name
-from handlers.common import (NEED_START, action_callback_data, battle_vitals_lines,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, main_menu, show, vitals_line)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             battle_vitals_lines, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show, vitals_line)
 from services import character, dungeon
 from services.combat import round_limit_label
 
@@ -25,7 +26,7 @@ async def render_dungeon(user_id: int):
         rows = [[InlineKeyboardButton(
             text="领取结算" if active["status"] == "ready" else "刷新进度",
             callback_data=await action_callback_data(user_id, "dg:collect"))]]
-        rows += main_menu().inline_keyboard
+        append_main_menu_return(rows)
         if active["status"] == "ready":
             text = f"🏯 {active['dungeon']} 已探索完成，可领取结算。"
         else:
@@ -43,7 +44,7 @@ async def render_dungeon(user_id: int):
             rows.append([InlineKeyboardButton(
                 text=f"进入 {d['name']}",
                 callback_data=await action_callback_data(user_id, f"dg:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -51,7 +52,7 @@ async def _active_markup(user_id: int) -> InlineKeyboardMarkup:
     rows = [[InlineKeyboardButton(
         text="领取 / 刷新秘境",
         callback_data=await action_callback_data(user_id, "dg:collect"))]]
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -139,6 +140,6 @@ async def cb_dungeon_run(callback: CallbackQuery):
         res = await dungeon.start(callback.from_user.id, action[3:])
     markup = await _active_markup(callback.from_user.id) if res["status"] in {
         "started", "pending", "ready",
-    } else main_menu()
+    } else section_back_markup("↩️ 返回秘境", "nav:dungeon")
     await show(callback, _result_text(res), markup)
     await callback.answer()

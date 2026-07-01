@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from config.items import item_name
+from config.items import is_tradable, item_name
 from models import db
 from services import character
 
@@ -24,6 +24,8 @@ async def create_listing(seller_id: int, item_key: str, qty: int, price: int, no
     price = int(price)
     if qty <= 0 or price < MIN_PRICE:
         return {"status": "bad_request"}
+    if not is_tradable(item_key):
+        return {"status": "no_trade", "item": item_name(item_key)}
     async with db.transaction() as conn:
         have = await character.item_qty_conn(conn, seller_id, item_key, bound=0)
         if have < qty:
@@ -86,9 +88,14 @@ async def cancel(seller_id: int, listing_id: int, now: int = None) -> dict:
             return {"status": "not_available"}
         if listing["seller_id"] != seller_id:
             return {"status": "forbidden"}
-        await conn.execute(
-            "UPDATE market_listings SET status='cancelled', updated_at=? WHERE id=?",
+        cur = await conn.execute(
+            "UPDATE market_listings SET status='cancelled', updated_at=? "
+            "WHERE id=? AND status='active'",
             (now, listing_id))
+        changed = cur.rowcount
+        await cur.close()
+        if not changed:
+            return {"status": "not_available"}
         await conn.execute(
             "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
             "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",

@@ -36,12 +36,14 @@ ITEMS = {
     "筑基丹": {"name": "筑基丹",   "type": "pill", "sell": 60},
     "金丹":   {"name": "金丹",     "type": "pill", "sell": 180},
     "元婴丹": {"name": "元婴丹",   "type": "pill", "sell": 500},
-    "化神丹": {"name": "化神丹",   "type": "pill", "sell": 1200},
+    "化神丹": {"name": "化神丹",   "type": "pill", "sell": 700},
     "化神丹残方": {"name": "化神丹残方", "type": "material", "sell": 90},
     "星陨砂": {"name": "星陨砂", "type": "material", "sell": 85},
     "幽都魂晶": {"name": "幽都魂晶", "type": "material", "sell": 95},
     "天外残玉": {"name": "天外残玉", "type": "material", "sell": 110},
     "转修令": {"name": "转修令", "type": "material", "sell": 0},
+    "保命符": {"name": "保命符", "type": "pill", "sell": 0, "use": "buff",
+             "buff": {"df_pct": 0.20, "hp_pct": 0.10}, "duration": 3600},
     "天魔令": {"name": "天魔令", "type": "material", "sell": 0},
     "丹霞玉": {"name": "丹霞玉", "type": "material", "sell": 0},
     "剑冢铁": {"name": "剑冢铁", "type": "material", "sell": 0},
@@ -63,6 +65,15 @@ ITEMS = {
     "青木甲图纸": {"name": "青木甲图纸", "type": "recipe", "recipe": "forge_armor"},
     "聚灵佩图纸": {"name": "聚灵佩图纸", "type": "recipe", "recipe": "forge_accessory"},
 }
+
+
+# 禁止玩家坊市交易的物品（spec §3.4 化神丹不直售；§7.1/T5.4 转修令/保命符默认绑定）。
+# 掉落即以 bound=0 进包，但这些关键材料不得经坊市绕过 NPC 直售 / 转修成本 / 绑定语义。
+NO_TRADE = frozenset({"转修令", "化神丹", "保命符"})
+
+
+def is_tradable(key: str) -> bool:
+    return key not in NO_TRADE
 
 
 def item_name(key: str) -> str:

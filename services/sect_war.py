@@ -1,10 +1,13 @@
-"""宗门战据点：轻量积分与据点 buff。"""
+"""宗门战据点：进攻守卫（复用战斗引擎）→ 累计积分 → 赛季结算发奖。"""
 from __future__ import annotations
 
+import random
 import time
 
 from config import sect_war as CFG
 from models import db
+from services import character
+from services.combat import Combatant, simulate
 
 
 def _season(now: int) -> str:
@@ -23,7 +26,13 @@ def is_open(now: int) -> bool:
             and CFG.WAR_START_HOUR <= lt.tm_hour < CFG.WAR_END_HOUR)
 
 
-async def capture(user_id: int, outpost_key: str, score: int = 10, now: int = None) -> dict:
+def _guard_combatant(outpost: dict) -> Combatant:
+    g = outpost["guard"]
+    return Combatant(name=g["name"], hp=g["hp"], mp=g["mp"], atk=g["atk"],
+                     df=g["df"], spd=g["spd"], crit=g["crit"], skills=g["skills"])
+
+
+async def capture(user_id: int, outpost_key: str, score: int = None, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     if outpost_key not in CFG.OUTPOSTS:
         return {"status": "bad_outpost"}
@@ -31,20 +40,75 @@ async def capture(user_id: int, outpost_key: str, score: int = 10, now: int = No
         return {"status": "closed",
                 "weekday": CFG.WAR_WEEKDAY,
                 "start_hour": CFG.WAR_START_HOUR, "end_hour": CFG.WAR_END_HOUR}
+    outpost = CFG.OUTPOSTS[outpost_key]
+    cur = await db.fetchone("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
+    if not cur:
+        return {"status": "not_member"}
+    sect_id = cur["sect_id"]
+    # spec §8.1：先复用战斗引擎击败据点守卫，胜方才计入宗门积分；败则无积分。
+    char = await character.get(user_id)
+    st = await character.stats(char)
+    skills = await character.get_skills(user_id)
+    mods = await character.combat_mods(user_id)
+    player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
+                       df=st["df"], spd=st["spd"], crit=st["crit"],
+                       skills=skills or ["普攻"], **mods)
+    result = simulate(player, _guard_combatant(outpost), seed=random.getrandbits(32))
+    if result["winner"] is not player:
+        return {"status": "defeated", "outpost": outpost["name"],
+                "guard": outpost["guard"]["name"]}
+    gain = int(outpost["win_score"] if score is None else score)
+    season = _season(now)
     async with db.transaction() as conn:
-        cur = await conn.execute("SELECT sect_id FROM sect_members WHERE user_id=?", (user_id,))
-        member = await cur.fetchone()
-        await cur.close()
-        if not member:
-            return {"status": "not_member"}
-        season = _season(now)
         # 复合主键 (sect_id, outpost_key)：一个宗门可同时持有多个据点，各自累计积分。
         await conn.execute(
             "INSERT INTO sect_outposts(sect_id, outpost_key, score, season, updated_at) "
             "VALUES(?,?,?,?,?) "
             "ON CONFLICT(sect_id, outpost_key) DO UPDATE SET score=score+?, season=?, updated_at=?",
-            (member["sect_id"], outpost_key, score, season, now, score, season, now))
-        return {"status": "ok", "outpost": CFG.OUTPOSTS[outpost_key]["name"], "score": score}
+            (sect_id, outpost_key, gain, season, now, gain, season, now))
+        return {"status": "ok", "outpost": outpost["name"], "score": gain}
+
+
+async def settle_season(now: int = None) -> dict:
+    """据点战赛季结算（spec §8.1"按宗门累计积分结算"）：积分最高的宗门夺魁，
+    其成员获绑定道行奖励，并清空本季据点积分。幂等：同一 season 只结算一次。
+
+    这是 sect_outposts.score 的消费方——积分不再是死数据。
+    """
+    now = int(time.time()) if now is None else now
+    season = _season(now)
+    async with db.transaction() as conn:
+        cur = await conn.execute(
+            "SELECT 1 FROM sect_war_rewards WHERE season=?", (season,))
+        done = await cur.fetchone()
+        await cur.close()
+        if done:
+            return {"status": "settled", "season": season}
+        cur = await conn.execute(
+            "SELECT sect_id, SUM(score) AS total FROM sect_outposts "
+            "WHERE season=? GROUP BY sect_id HAVING total > 0 ORDER BY total DESC LIMIT 1",
+            (season,))
+        top = await cur.fetchone()
+        await cur.close()
+        if not top:
+            return {"status": "no_participants", "season": season}
+        winner_sect, winner_score = top["sect_id"], top["total"]
+        cur = await conn.execute(
+            "SELECT user_id FROM sect_members WHERE sect_id=?", (winner_sect,))
+        members = await cur.fetchall()
+        await cur.close()
+        for m in members:
+            await conn.execute(
+                "UPDATE characters SET daohang=daohang+? WHERE user_id=?",
+                (CFG.WAR_SEASON_DAOHANG_REWARD, m["user_id"]))
+        await conn.execute(
+            "INSERT INTO sect_war_rewards(season, sect_id, score, settled_at) VALUES(?,?,?,?)",
+            (season, winner_sect, winner_score, now))
+        # 结算后清空本季据点积分，下一季重新累计（buff 归属保留在 outpost 行）。
+        await conn.execute("UPDATE sect_outposts SET score=0 WHERE season=?", (season,))
+        return {"status": "ok", "season": season, "sect_id": winner_sect,
+                "score": winner_score, "members": len(members),
+                "daohang": CFG.WAR_SEASON_DAOHANG_REWARD}
 
 
 async def bonuses_for_user(user_id: int) -> dict:

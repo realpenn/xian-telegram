@@ -1,4 +1,20 @@
+from config import maps as M
 from config import realms as R
+
+
+def _weight(drops, key):
+    return next((w for k, w, *_ in drops if k == key), 0)
+
+
+def test_huashen_pill_drop_is_two_thirds_of_yuanying():
+    """化神丹掉率 = 元婴丹的 2/3（天魔古原同图对比：元婴丹 6% → 化神丹 4%）。"""
+    drops = M.MAPS["天魔古原"]["drops"]
+    yuanying = _weight(drops, "元婴丹")
+    huashen = _weight(drops, "化神丹")
+    assert yuanying == 6
+    assert huashen == round(yuanying * 2 / 3)  # 4
+    # 天外古墟（化神难图）同步为 4%。
+    assert _weight(M.MAPS["天外古墟"]["drops"], "化神丹") == 4
 
 
 def test_realm4_config_complete():

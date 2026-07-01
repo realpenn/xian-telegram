@@ -103,7 +103,7 @@ async def test_weekly_theme_rotates_and_rejects_closed(temp_db):
 async def test_sect_outpost_capture_adds_buff_under_clamp(temp_db):
     uid = 9603
     await character.create(uid, "leader")
-    await character.set_progress(uid, 1, 0, 0)
+    await character.set_progress(uid, 4, 0, 0)  # 化神圆满方能击败据点守卫
     await character.add_stone(uid, 1000)
     await sect.create(uid, "战宗", now=1000)
     base = await character.stats(await character.get(uid))
@@ -121,7 +121,7 @@ async def test_sect_outpost_capture_adds_buff_under_clamp(temp_db):
 async def test_sect_war_closed_outside_window(temp_db):
     uid = 9613
     await character.create(uid, "closed")
-    await character.set_progress(uid, 1, 0, 0)
+    await character.set_progress(uid, 4, 0, 0)
     await character.add_stone(uid, 1000)
     await sect.create(uid, "时窗宗", now=1000)
 
@@ -137,7 +137,7 @@ async def test_sect_war_closed_outside_window(temp_db):
 async def test_sect_can_hold_multiple_outposts(temp_db):
     uid = 9614
     await character.create(uid, "multi")
-    await character.set_progress(uid, 1, 0, 0)
+    await character.set_progress(uid, 4, 0, 0)
     await character.add_stone(uid, 1000)
     await sect.create(uid, "多据点宗", now=1000)
 
@@ -154,7 +154,7 @@ async def test_sect_can_hold_multiple_outposts(temp_db):
 async def test_sect_outpost_seclusion_buff_improves_gain(temp_db):
     uid = 9604
     await character.create(uid, "cave")
-    await character.set_progress(uid, 1, 0, 0)
+    await character.set_progress(uid, 4, 0, 0)
     await character.add_stone(uid, 1000)
     await sect.create(uid, "洞府宗", now=1000)
     await sect_war.capture(uid, "cave", now=WAR_OPEN)
@@ -162,7 +162,7 @@ async def test_sect_outpost_seclusion_buff_improves_gain(temp_db):
 
     plain = 9605
     await character.create(plain, "plain")
-    await character.set_progress(plain, 1, 0, 0)
+    await character.set_progress(plain, 4, 0, 0)
     await db.execute("UPDATE characters SET root_bone=0 WHERE user_id=?", (plain,))
 
     await character.start_seclusion(uid, now=2000)
@@ -171,6 +171,109 @@ async def test_sect_outpost_seclusion_buff_improves_gain(temp_db):
     without_buff = await character.collect_seclusion(plain, now=5600)
 
     assert with_buff["gained"] > without_buff["gained"]
+
+
+@pytest.mark.asyncio
+async def test_sect_war_capture_requires_beating_guard(temp_db):
+    """R-P0-2：低境界成员打不过据点守卫 → 无积分（capture 必须经战斗）。"""
+    uid = 9620
+    await character.create(uid, "weak")
+    await character.set_progress(uid, 1, 0, 0)  # 炼气期，远不敌守卫
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "弱宗", now=1000)
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+
+    assert res["status"] == "defeated"
+    row = await db.fetchone(
+        "SELECT COALESCE(SUM(score),0) AS s FROM sect_outposts WHERE outpost_key='altar'")
+    assert row["s"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sect_war_season_settles_top_sect_once(temp_db):
+    """R-P0-2：据点积分有消费方——赛季结算向夺魁宗门成员发绑定道行，且幂等。"""
+    uid = 9621
+    await character.create(uid, "champ")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    await sect.create(uid, "夺魁宗", now=1000)
+    await sect_war.capture(uid, "altar", now=WAR_OPEN)
+    before = (await character.get(uid)).daohang
+
+    res = await sect_war.settle_season(now=WAR_OPEN)
+    assert res["status"] == "ok"
+    assert res["members"] == 1
+    after = (await character.get(uid)).daohang
+    assert after == before + sect_war.CFG.WAR_SEASON_DAOHANG_REWARD
+
+    # 幂等：重复结算不再发放。
+    again = await sect_war.settle_season(now=WAR_OPEN)
+    assert again["status"] == "settled"
+    assert (await character.get(uid)).daohang == after
+
+
+@pytest.mark.asyncio
+async def test_activity_shop_exchanges_material_for_baoming(temp_db):
+    """R-P1-5：活动商店消耗活动材料兑保命符（绑定，不入坊市）。"""
+    uid = 9630
+    await character.create(uid, "shop")
+    await character.add_item(uid, "天魔令", 5, bound=1)
+
+    res = await weekly_events.exchange(uid, "baoming", now=1000)
+
+    assert res["status"] == "ok" and res["item"] == "保命符"
+    assert await character.item_qty(uid, "保命符", bound=1) == 1
+    assert await character.item_qty(uid, "天魔令") == 3  # 扣 2
+
+
+@pytest.mark.asyncio
+async def test_activity_shop_exchanges_material_for_ascension_point(temp_db):
+    """R-P1-3 源之四：活动材料兑飞升点。"""
+    uid = 9631
+    await character.create(uid, "shop2")
+    await character.add_item(uid, "丹霞玉", 3, bound=1)
+
+    res = await weekly_events.exchange(uid, "ascension", now=1000)
+
+    assert res["status"] == "ok" and res["kind"] == "ascension"
+    from services import ascension
+    assert (await ascension.get(uid))["points"] == res["qty"]
+
+
+@pytest.mark.asyncio
+async def test_activity_shop_rejects_when_material_short(temp_db):
+    uid = 9632
+    await character.create(uid, "poor")
+    await character.add_item(uid, "天魔令", 1, bound=1)
+    res = await weekly_events.exchange(uid, "baoming", now=1000)
+    assert res["status"] == "no_material"
+
+
+@pytest.mark.asyncio
+async def test_huashen_world_boss_grants_ascension_points_to_top_ranks(temp_db):
+    """R-P1-3 源之三：化神世界 Boss 前列按名次发飞升点。"""
+    from services import ascension, world_boss
+
+    cfg = world_boss._boss_cfg("huashen")
+    assert cfg.get("realm") == 4
+    boss_id = 1
+    ranked = []
+    for i, dmg in enumerate((3000, 2000, 1000, 500)):
+        uid = 9640 + i
+        await character.create(uid, f"raider{i}")
+        await db.execute(
+            "INSERT INTO world_boss_damage(boss_id, user_id, damage) VALUES(?,?,?)",
+            (boss_id, uid, dmg))
+        ranked.append(uid)
+
+    async with db.transaction() as conn:
+        rewards = await world_boss._distribute(conn, boss_id, cfg)
+
+    # 前三名各得 3/2/1 飞升点，第四名无。
+    assert [r["ascension_points"] for r in rewards] == [3, 2, 1, 0]
+    assert (await ascension.get(ranked[0]))["points"] == 3
+    assert (await ascension.get(ranked[3]))["points"] == 0
 
 
 @pytest.mark.asyncio

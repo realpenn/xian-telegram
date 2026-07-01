@@ -5,7 +5,56 @@ import time
 
 from config import weekly_events as CFG
 from models import db
-from services import activity, character
+from services import activity, ascension, character
+
+
+async def _activity_material_total(conn, user_id: int) -> int:
+    total = 0
+    for mat in CFG.ACTIVITY_MATERIALS:
+        total += await character.item_qty_conn(conn, user_id, mat)
+    return total
+
+
+async def _consume_activity_materials(conn, user_id: int, need: int):
+    """按固定顺序消耗任意活动材料，凑够 need 个。"""
+    left = need
+    for mat in CFG.ACTIVITY_MATERIALS:
+        if left <= 0:
+            break
+        have = await character.item_qty_conn(conn, user_id, mat)
+        if have <= 0:
+            continue
+        used = min(left, have)
+        await character.consume_item_conn(conn, user_id, mat, used)
+        left -= used
+
+
+async def exchange(user_id: int, offer_key: str, now: int = None) -> dict:
+    """活动商店：消耗活动材料兑换保命符 / 飞升点（spec §5.4 / T4.1；T3.2 飞升点源之四）。"""
+    now = int(time.time()) if now is None else now
+    offer = CFG.SHOP_OFFERS.get(offer_key)
+    if not offer:
+        return {"status": "bad_offer"}
+    cost = int(offer["material_cost"])
+    async with db.transaction() as conn:
+        ch = await character._select_character(conn, user_id)
+        if not ch:
+            return {"status": "missing"}
+        have = await _activity_material_total(conn, user_id)
+        if have < cost:
+            return {"status": "no_material", "need": cost, "have": have}
+        await _consume_activity_materials(conn, user_id, cost)
+        if offer["reward_kind"] == "ascension":
+            await ascension.add_points_conn(conn, user_id, int(offer["reward_qty"]), now)
+            return {"status": "ok", "kind": "ascension", "name": offer["name"],
+                    "qty": int(offer["reward_qty"]), "cost": cost}
+        # 绑定道具入包（bound=1），与坊市隔离一致。
+        await conn.execute(
+            "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,?) "
+            "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty=qty+?",
+            (user_id, offer["reward_item"], int(offer["reward_qty"]), int(offer["reward_qty"])))
+        return {"status": "ok", "kind": "item", "name": offer["name"],
+                "item": offer["reward_item"], "qty": int(offer["reward_qty"]), "cost": cost}
 
 
 def _week(now: int) -> str:

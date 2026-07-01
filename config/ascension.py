@@ -5,6 +5,11 @@ PASSIVE_CAP = 5
 TRIAL_DAOHANG_COST = 500
 TRIAL_POINT_REWARD = 1
 POINTS_PER_PASSIVE_LEVEL = 1
+# T3.2 四源之三/四：化神世界 Boss 前列按名次发飞升点；活动副本兑换消耗材料换飞升点。
+BOSS_RANK_POINTS = [3, 2, 1]           # 第 1/2/3 名的飞升点（仅化神 realm4 Boss）
+BOSS_ASCENSION_REALM = 4
+EXCHANGE_MATERIAL_COST = 3             # 活动商店：N 个活动材料兑 1 飞升点
+EXCHANGE_POINT_REWARD = 1
 PASSIVES = {
     "hp_pct": "气血",
     "atk_pct": "攻伐",

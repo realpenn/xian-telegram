@@ -1,52 +1,87 @@
-# 问道 · 修仙 Telegram 群文字 RPG（工作标题）
+# 问道 · 修仙 Telegram 群文字 RPG
 
-一款 Chat Wars 氛围、修仙世界规格的中文 Telegram 文字 RPG。
-交互采用「指令 + 按钮」，技术栈 Python + aiogram + SQLite。
+一款 Chat Wars 氛围、修仙世界规格的中文 Telegram 文字 RPG。交互采用「指令 + 按钮」，技术栈为 Python + aiogram + SQLite。
 
 ## 当前状态
 
-✅ **v0.1.5：可玩性与社交回流版**。完整设计见 **[spec.md](spec.md)**；二期草案见 **[spec-v2.md](spec-v2.md)**。
+当前 `main` 已从 v1 主线推进到 v2 实现态：**境界开放到化神圆满**，并接入道途 / 转修、飞升点、周活动、宗门战据点和玩家一口价坊市。
 
-当前已实现 v1 主线：**注册测灵根 → 闭关攒修为 → 突破境界 → 历练 / 秘境 → 炼丹炼器 → 法宝功法配置 → 群内切磋 / 世界 Boss / 宗门**。
-已接入一次性回调 token、增益丹临时 buff、世界 Boss 定时刷新与到期/击杀结算；v0.1.5 重点补足「后台一直产出、前台持续决策、群里有人情味」的可玩性层。
+完整设计与执行拆分见 [spec.md](spec.md)、[spec-v2.md](spec-v2.md) 和 [docs/plans/v2](docs/plans/v2)。玩家基础玩法说明见 [问道玩家指南](docs/USER_GUIDE.md)。
 
-### v0.1.5 亮点
+## 已实现玩法
 
-- 闭关变成后台被动轨，历练 / 秘境 / 炼制作为前台主动轨可并行；前台活动时间会折算闭关收益，避免产出膨胀。
-- 已稳定通关的本境界地图可扫荡，仍复用战斗模拟、精力消耗和掉落口径，只免去实时等待与二次领取。
-- 历练新增低频奇遇选择事件，玩家可在高风险探宝、稳妥绕行、救人得声望之间做取舍。
-- 金丹 / 元婴大突破的天劫改为逐雷互动，可选择护体法宝、护盾战技、嗑大还丹或硬抗。
-- 新增 `/quest` 悬赏入口，支持每日 / 周常任务、进度累加、领取奖励与长线成就；成就也会展示在 `/me`。
-- 大境界突破、斩妖王、稀有掉落、天梯段位变动、宗门升级等事件会低频进入群播报 / DM 通知队列，避免刷屏同时制造回流理由。
-- 任务、成就和社交播报统一走领域事件管线，并用 savepoint 隔离副作用，避免通知或任务异常回滚核心奖励。
+- 个人成长：注册测灵根、角色面板、闭关 / 自动闭关、修为溢出分流、大小境界突破、金丹起交互式天劫、元婴到化神的神魂劫。
+- PvE：每境界三档历练地图、低阶地图折叠、稳定通关后的扫荡、低频奇遇选择、秘境逐层挑战、世界 Boss 分档与群内合击。
+- 资源与战斗：精力、气血、法力均按时间惰性恢复；历练 / 秘境按出发血蓝快照结算，重伤不丢装备和修为。
+- 炼制与装备：炼丹、炼器、丹方 / 图纸解锁、法宝装备、强化、重铸、分解器魂，高阶化神装备和化神丹炼制链路已接入。
+- 长线成长：元婴起选择五类道途（剑修、体修、丹修、器修、符阵），支持道行升阶、转修令切换主道途；化神圆满后溢出修为可转为道行与飞升点。
+- 群玩法：群内切磋、天梯积分 / 声望、周榜结算、宗门创建 / 加入 / 捐输 / 任务 / 商店 / 升级、宗门战据点与赛季结算。
+- 周期内容：每日签到、悬赏任务 / 成就、周活动副本、活动商店、月赛季称号与道行奖励。
+- 玩家经济：NPC 商店与回收、玩家一口价坊市、成交税、绑定库存隔离；化神丹、转修令、保命符等关键物品不可上架。
+- 通知与安全：一次性回调 token、DB 写事务串行化、WAL 读写隔离、定时 Boss 刷新与结算、完成提醒、低频社交播报。
 
-欢迎道友以 **Issue / Pull Request** 讨论。
+境界跨度：
+
+```text
+炼气期 → 筑基期 → 金丹期 → 元婴期 → 化神期
+```
+
+## 指令速览
+
+私聊养成入口：
+
+```text
+/start        踏入仙途 / 测灵根
+/me           查看角色面板
+/cultivate    闭关 / 出关
+/explore      历练
+/dungeon      秘境
+/craft        炼丹炼器
+/skills       法宝 / 功法
+/shop         NPC 商店
+/daily        每日签到
+/quest        悬赏任务
+/bag          储物袋
+/path         道途 / 转修
+/ascension    飞升试炼与被动
+/weekly       周活动副本
+/market       玩家坊市
+/sectwar      宗门战据点
+/help         指南
+```
+
+群聊与社交入口：
+
+```text
+/pvp          群内切磋 / 天梯
+/rank         天梯排行
+/boss         群内世界 Boss
+/sect         宗门事务
+```
 
 ## 运行
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # 填入向 @BotFather 申请的 BOT_TOKEN
 python -m bot                 # 启动 bot（polling）
 ```
 
-在 Telegram 私聊里发送 `/start` 测灵根，再用 `/cultivate`、`/explore`、`/dungeon`、`/craft`、`/skills`、`/shop` 等指令养成；在群里使用 `/pvp`、`/rank`、`/boss`，用 `/sect` 处理宗门事务。
-玩家向详细说明见 **[问道玩家指南](docs/USER_GUIDE.md)**。
-开发自检：`python -m pytest`（战斗 / 结算 / 突破 / 制造 / 秘境 / 经济 / PvP / Boss / 宗门核心逻辑单测）。
+SQLite 数据库会自动创建在 `data/xian.db`。也可以用 `python main.py` 启动，等价于 `python -m bot`。
 
-## v1 范围
+## 开发自检
 
-个人养成核心循环（闭关修炼 → 突破境界 → 历练刷怪 → 炼丹炼器 → 变强）
-+ PvE（历练 / 秘境 / 妖王 / 世界 Boss）
-+ PvP 群多人玩法（切磋 / 天梯 / 宗门）。
+```bash
+python -m pytest
+python -m tools.balance_sim
+```
 
-境界跨度：炼气 → 筑基 → 金丹 → 元婴。
+测试覆盖战斗、结算、突破、气血法力、炼制、秘境、经济、PvP、世界 Boss、宗门、道途、飞升、周活动、坊市、读写隔离和 v2 审计回归。
 
 ## 技术栈
 
 - Python + [aiogram](https://github.com/aiogram/aiogram) 3.x
-- SQLite（aiosqlite）
-- APScheduler（定时事件）
-
-设计细节、数值公式、数据模型与实施拆分，详见 **[spec.md](spec.md)**。
+- SQLite + aiosqlite（WAL、独立只读连接、写事务串行化）
+- APScheduler（世界 Boss、PvP / 宗门战 / 月赛季结算、通知与清理任务）

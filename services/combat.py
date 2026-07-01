@@ -11,6 +11,9 @@ from dataclasses import dataclass, field
 from config.skills import SKILLS
 
 MAX_ROUNDS = 30
+# 「战至分胜负」(max_rounds=None) 的安全兜底：僵局对局（净治疗≥净伤害）本会无限循环，
+# 每回合向 log 追加数行 → 内存无界 + 阻塞事件循环。触顶按剩余气血比例判定，与限回合同义。
+HARD_ROUND_CAP = 1000
 DEF_K = 300
 CRIT_K = 200
 CRIT_CAP = 0.50
@@ -177,7 +180,8 @@ def simulate(a: Combatant, d: Combatant, seed: int = 0, *,
     order = (a, d) if (a.spd + a.initiative) >= (d.spd + d.initiative) else (d, a)
     rnd = 0
     max_rounds = None if max_rounds is None else max(1, int(max_rounds))
-    while max_rounds is None or rnd < max_rounds:
+    cap = HARD_ROUND_CAP if max_rounds is None else max_rounds
+    while rnd < cap:
         rnd += 1
         for c in (a, d):
             _tick_dots(c, log)

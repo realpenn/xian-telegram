@@ -1,4 +1,5 @@
-from services.combat import MAX_ROUNDS, Combatant, round_limit_label, simulate
+from services.combat import (
+    HARD_ROUND_CAP, MAX_ROUNDS, Combatant, round_limit_label, simulate)
 
 
 def _mk(name, hp=1000, atk=100, df=50, spd=30, crit=10, mp=100, skills=None, **mods):
@@ -44,6 +45,20 @@ def test_unbounded_combat_runs_past_default_round_limit_to_defeat():
     assert r["rounds"] > MAX_ROUNDS
     assert r["winner"] in (a, b)
     assert r["reason"] in ("defeat", "double_down")
+
+
+def test_unbounded_stalemate_terminates_at_hard_cap():
+    # 净治疗 >> 净伤害的僵局：max_rounds=None 本会无限循环并撑爆 log/事件循环。
+    # 硬上限必须让它终止，并退回按气血比例判定（避免 OOM）。
+    a = _mk("甲", hp=1000, atk=1, df=100000, mp=1000, skills=["回春术", "普攻"])
+    b = _mk("乙", hp=1000, atk=1, df=100000, mp=1000, spd=10, skills=["回春术", "普攻"])
+
+    r = simulate(a, b, seed=3, max_rounds=None)
+
+    assert r["rounds"] == HARD_ROUND_CAP
+    assert r["reason"] == "round_limit"
+    assert r["winner"] in (a, b)
+    assert len(r["log"]) < HARD_ROUND_CAP * 6  # log 有界
 
 
 def test_skill_used_when_affordable():

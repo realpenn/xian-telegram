@@ -148,11 +148,6 @@ async def cb_market_action(callback: CallbackQuery):
         await show(callback, text, markup)
         await callback.answer()
         return
-    if op == "back":
-        text, markup = await render_market(uid)
-        await show(callback, text, markup)
-        await callback.answer()
-        return
     if op == "confirm":
         key, price = value.rsplit(":", 1)
         res = await market.create_listing(uid, key, 1, _clamp_price(int(price)))

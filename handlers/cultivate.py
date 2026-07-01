@@ -110,6 +110,7 @@ def _bt_text(res: dict) -> str:
 
 async def _bt_markup(user_id: int, res: dict):
     if res["status"] != "tribulation_choice":
+        # 突破入口在道行页；突破结果返回道行面板，便于继续查看进度。
         return section_back_markup("↩️ 返回道行", "nav:me")
     rows = []
     for choice in res.get("choices", []):

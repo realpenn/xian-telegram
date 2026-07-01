@@ -15,7 +15,7 @@ from handlers import (ascension, bag, boss, craft, cultivate, daily, dao_path,
 from handlers.common import cleanup_callback_tokens
 from models import db
 from handlers import quest
-from services import activity, character, notifications, season, social, world_boss
+from services import activity, character, notifications, season, sect_war, social, world_boss
 from services import pvp as pvp_service
 
 
@@ -77,6 +77,8 @@ async def main():
     scheduler.add_job(pvp_service.settle_weekly, "cron", day_of_week="sun", hour=23, minute=55)
     # 月末 23:50 结算月赛季：向天梯参与者发绑定称号 + 道行（幂等，#A2）。
     scheduler.add_job(season.settle_monthly, "cron", day="last", hour=23, minute=50)
+    # 月末 23:45 结算据点战赛季：积分最高宗门夺魁，成员得绑定道行（幂等，spec §8.1）。
+    scheduler.add_job(sect_war.settle_season, "cron", day="last", hour=23, minute=45)
     scheduler.add_job(cleanup_callback_tokens, "interval", hours=1)
     scheduler.add_job(activity.cleanup, "interval", hours=6)
     scheduler.add_job(notifications.notify_ready_actions, "interval", minutes=1, args=[bot])

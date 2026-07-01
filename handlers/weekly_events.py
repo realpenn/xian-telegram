@@ -31,15 +31,29 @@ async def render_weekly(user_id: int):
     rows = [[InlineKeyboardButton(
         text=f"挑战 {theme['name']}",
         callback_data=await action_callback_data(user_id, f"weekly:run:{open_key}"))]]
+    lines.append("—— 活动商店（消耗活动材料，均为绑定）——")
+    for key, offer in CFG.SHOP_OFFERS.items():
+        lines.append(f"{offer['name']} ×{offer['reward_qty']}：{offer['material_cost']} 活动材料")
+        rows.append([InlineKeyboardButton(
+            text=f"兑换 {offer['name']}（{offer['material_cost']} 材料）",
+            callback_data=await action_callback_data(user_id, f"weekly:shop:{key}"))])
     rows += main_menu().inline_keyboard
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _result_text(res: dict) -> str:
     s = res["status"]
+    if s == "ok" and res.get("kind") == "ascension":
+        return f"兑换成功，消耗 {res['cost']} 活动材料，获得飞升点 +{res['qty']}。"
+    if s == "ok" and res.get("kind") == "item":
+        return f"兑换成功，消耗 {res['cost']} 活动材料，获得 {item_name(res['item'])} ×{res['qty']}（绑定）。"
     if s == "ok":
         bound = "绑定" if res.get("bound") else "非绑定"
         return f"{res['theme']} 完成，获道行 +{res['daohang']}，{item_name(res['material'])} ×1（{bound}）。"
+    if s == "no_material":
+        return f"活动材料不足（需 {res['need']}，现有 {res['have']}）。"
+    if s == "bad_offer":
+        return "暂无此兑换。"
     if s == "no_stamina":
         return f"精力不足（需 {res['need']}，现有 {res['have']}）。"
     if s == "closed":
@@ -76,5 +90,17 @@ async def cb_weekly_run(callback: CallbackQuery):
     if not action or not action.startswith("weekly:run:"):
         return
     res = await weekly_events.run(callback.from_user.id, action.rsplit(":", 1)[1])
+    await show(callback, _result_text(res), main_menu())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("weekly:shop:"))
+async def cb_weekly_shop(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    action = await consume_action_callback(callback)
+    if not action or not action.startswith("weekly:shop:"):
+        return
+    res = await weekly_events.exchange(callback.from_user.id, action.rsplit(":", 1)[1])
     await show(callback, _result_text(res), main_menu())
     await callback.answer()

@@ -318,6 +318,13 @@ CREATE TABLE IF NOT EXISTS pvp_season_rewards (
     claimed_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, season)
 );
+CREATE TABLE IF NOT EXISTS sect_war_rewards (
+    season      TEXT NOT NULL,
+    sect_id     INTEGER NOT NULL,
+    score       INTEGER NOT NULL DEFAULT 0,
+    settled_at  INTEGER NOT NULL,
+    PRIMARY KEY (season)
+);
 CREATE TABLE IF NOT EXISTS market_listings (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     seller_id   INTEGER NOT NULL,
@@ -385,6 +392,7 @@ async def init_db(path: str = None):
     await _ensure_column(_conn, "explore_runs", "event_choice", "TEXT")
     await _ensure_column(_conn, "dungeon_jobs", "start_hp", "INTEGER")
     await _ensure_column(_conn, "dungeon_jobs", "start_mp", "INTEGER")
+    await _ensure_column(_conn, "ascension", "last_trial_week", "TEXT")
     await _migrate_inventory_bound(_conn)
     await _migrate_sect_outposts_pk(_conn)
     await _conn.commit()

@@ -9,9 +9,10 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from config.bosses import (DEFAULT_BOSS, WORLD_BOSSES, WORLD_BOSS_FULL_HP_CULTIVATORS,
                            boss_key_for_realm, canonical_boss_key)
+from config import ascension as ASC_CFG
 from config.items import item_name
 from handlers.common import action_callback_data
-from services import character, game_events
+from services import ascension, character, game_events
 from services.combat import Combatant, simulate
 from models import db
 
@@ -372,8 +373,13 @@ async def _distribute(conn, boss_id: int, cfg: dict):
                 "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,0,?) "
                 "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + ?",
                 (row["user_id"], key, qty, qty))
+        # T3.2 源之三：化神世界 Boss 前列额外发飞升点（账号级，非灵石经济）。
+        asc_points = 0
+        if cfg.get("realm") == ASC_CFG.BOSS_ASCENSION_REALM and idx < len(ASC_CFG.BOSS_RANK_POINTS):
+            asc_points = ASC_CFG.BOSS_RANK_POINTS[idx]
+            await ascension.add_points_conn(conn, row["user_id"], asc_points)
         rewards.append({"user_id": row["user_id"], "stone": stone, "drops": drops,
-                        "rank": idx + 1})
+                        "rank": idx + 1, "ascension_points": asc_points})
     return rewards
 
 

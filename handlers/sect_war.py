@@ -43,6 +43,10 @@ def _result_text(res: dict) -> str:
     s = res["status"]
     if s == "ok":
         return f"据点争夺成功：{res['outpost']}，宗门积分 +{res['score']}。"
+    if s == "defeated":
+        return f"不敌 {res['guard']}，据点 {res['outpost']} 争夺失败，未得积分。"
+    if s == "closed":
+        return "据点战未开放（每周六 20:00–21:00）。"
     if s == "not_member":
         return "尚未加入宗门，不可参与宗门战。"
     if s == "bad_outpost":

@@ -45,6 +45,28 @@ async def test_ascension_trial_grants_points_and_costs_daohang(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_ascension_trial_weekly_cooldown(temp_db):
+    """R-P1-2：每周仅一次飞升试炼——同周第二次拒绝，防囤道行无限刷飞升点。"""
+    uid = 9509
+    await character.create(uid, "weekly")
+    await character.set_progress(uid, 4, 3, R.advance_cost(4, 3))
+    await db.execute("UPDATE characters SET daohang=? WHERE user_id=?",
+                     (CFG.TRIAL_DAOHANG_COST * 5, uid))
+
+    first = await ascension.trial(uid, now=1000)
+    second = await ascension.trial(uid, now=1500)  # 同一周
+
+    assert first["status"] == "ok"
+    assert second["status"] == "weekly_done"
+    # 道行只被扣一次，飞升点只发一次。
+    assert (await ascension.get(uid))["points"] == CFG.TRIAL_POINT_REWARD
+
+    # 下一周（+8 天）恢复。
+    third = await ascension.trial(uid, now=1000 + 8 * 86400)
+    assert third["status"] == "ok"
+
+
+@pytest.mark.asyncio
 async def test_passive_upgrade_caps_at_five_levels(temp_db):
     uid = 9503
     await character.create(uid, "passive")

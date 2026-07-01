@@ -10,6 +10,10 @@ from models import db
 from services import game_events
 
 
+def _week(now: int) -> str:
+    return time.strftime("%Y-%W", time.localtime(now))
+
+
 async def get(user_id: int) -> dict:
     row = await db.fetchone("SELECT * FROM ascension WHERE user_id=?", (user_id,))
     if not row:
@@ -44,12 +48,21 @@ async def trial(user_id: int, now: int = None) -> dict:
             return {"status": "missing"}
         if ch["realm"] != len(R.REALM_NAMES) - 1 or ch["stage"] != R.num_stages(ch["realm"]) - 1:
             return {"status": "locked"}
+        # spec §6.2：每周仅可完成一次飞升试炼，防止囤道行无限刷飞升点旁路 5 级硬上限。
+        week = _week(now)
+        cur = await conn.execute("SELECT last_trial_week FROM ascension WHERE user_id=?", (user_id,))
+        asc = await cur.fetchone()
+        await cur.close()
+        if asc and asc["last_trial_week"] == week:
+            return {"status": "weekly_done", "week": week}
         if ch["daohang"] < CFG.TRIAL_DAOHANG_COST:
             return {"status": "no_daohang", "need": CFG.TRIAL_DAOHANG_COST, "have": ch["daohang"]}
         await conn.execute(
             "UPDATE characters SET daohang=daohang-? WHERE user_id=?",
             (CFG.TRIAL_DAOHANG_COST, user_id))
         await add_points_conn(conn, user_id, CFG.TRIAL_POINT_REWARD, now)
+        await conn.execute(
+            "UPDATE ascension SET last_trial_week=? WHERE user_id=?", (week, user_id))
         await game_events.emit_conn(
             conn, user_id, "ascension.trial",
             {"points": CFG.TRIAL_POINT_REWARD, "amount": CFG.TRIAL_POINT_REWARD}, now)

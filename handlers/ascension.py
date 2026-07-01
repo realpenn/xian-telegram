@@ -51,6 +51,8 @@ def _result_text(res: dict) -> str:
         return f"{res['name']} 被动升至 {res['level']} 级。{unlock}"
     if s == "locked":
         return "化神圆满后方可挑战飞升试炼。"
+    if s == "weekly_done":
+        return "本周飞升试炼已完成，下周再来。"
     if s == "no_daohang":
         return f"道行不足（需 {res['need']}，现有 {res['have']}）。"
     if s == "no_points":

@@ -1,11 +1,14 @@
 """玩家一口价坊市（v2 M5）。"""
 from __future__ import annotations
 
+import logging
 import time
 
 from config.items import is_tradable, item_name
 from models import db
 from services import character
+
+log = logging.getLogger("xian.market")
 
 MARKET_TAX_RATE = 0.05
 MIN_PRICE = 1
@@ -140,7 +143,11 @@ async def _notify_recent_listings_for_chat(bot, chat_id: int, now: int) -> dict:
     text = _recent_listings_text(rows, total)
     try:
         await bot.send_message(chat_id, text)
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "market broadcast send failed chat_id=%s listings=%s: %s",
+            chat_id, total, exc)
+        await _remember_market_broadcast(chat_id, now)
         return {"status": "failed", "listings": total}
     await _remember_market_broadcast(chat_id, now)
     return {"status": "sent", "listings": total}

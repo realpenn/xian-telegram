@@ -97,6 +97,7 @@ async def test_dense_feature_home_pages_link_to_categories_before_actions(temp_d
     await character.set_progress(uid, 1, 0, 0)
     await character.add_item(uid, "灵草", 3)
     await character.add_item(uid, "疗伤丹", 1)
+    await character.add_item(uid, "筑基丹", 1)
     await character.add_item(uid, "归元心法残页", 3)
     await character.create_item_instance(uid, "玄铁剑")
     await character.add_item(seller, "星陨砂", 1)
@@ -111,10 +112,15 @@ async def test_dense_feature_home_pages_link_to_categories_before_actions(temp_d
 
     _text, bag_home = await bag_handler.render_bag(uid)
     bag_home_datas = _datas(bag_home)
-    assert {"bag:cat:usable", "bag:cat:material", "bag:cat:equipment"} <= set(bag_home_datas)
+    assert {"bag:cat:usable", "bag:cat:pill", "bag:cat:material",
+            "bag:cat:equipment"} <= set(bag_home_datas)
     assert not any(data.startswith("bag:use:") for data in bag_home_datas)
     _text, bag_cat = await bag_handler.render_bag_category(uid, "usable")
     assert any(data.startswith("bag:use:") for data in _datas(bag_cat))
+    pill_text, _markup = await bag_handler.render_bag_category(uid, "pill")
+    assert "突破时自动消耗" in pill_text
+    equipment_text, _markup = await bag_handler.render_bag_category(uid, "equipment")
+    assert "请到「功法」" in equipment_text
 
     _text, market_home = await market_handler.render_market(uid)
     market_home_datas = _datas(market_home)

@@ -22,6 +22,12 @@ BAG_CATEGORIES = [
     ("equipment", "法宝", "法宝"),
 ]
 _CAT_TITLE = {cat: title for cat, title, _ in BAG_CATEGORIES}
+_CAT_HINT = {
+    "pill": "突破丹会在突破时自动消耗；可直接服用的丹药在「可使用」中操作。",
+    "material": "材料用于炼制、突破或交易，本页仅查看库存。",
+    "page": "残页集齐后可在「功法」中领悟。",
+    "equipment": "这里只查看法宝状态；装备、强化、重铸、分解请到「功法」。",
+}
 
 
 def _inventory_groups(inv: list[tuple[str, int]]) -> dict:
@@ -76,10 +82,15 @@ async def render_bag_category(user_id: int, cat: str):
     if cat not in _CAT_TITLE:
         return await render_bag(user_id)
 
+    has_content = bool(instances if cat == "equipment" else groups.get(cat))
+    if not has_content:
+        return await render_bag(user_id)
+
     lines = [f"🎒 {_CAT_TITLE[cat]}"]
-    if inv:
-        for key, qty in groups.get(cat, []):
-            lines.append(f"{item_name(key)} ×{qty}")
+    if cat in _CAT_HINT:
+        lines.append(_CAT_HINT[cat])
+    for key, qty in groups.get(cat, []):
+        lines.append(f"{item_name(key)} ×{qty}")
     buttons = []
     if cat == "usable":
         for key, _qty in groups["usable"]:
@@ -90,8 +101,6 @@ async def render_bag_category(user_id: int, cat: str):
         for inst in instances:
             mark = "已装备" if inst["equipped_slot"] else "未装备"
             lines.append(f"#{inst['id']} {item_name(inst['base_key'])}（{mark}）")
-    if len(lines) == 1:
-        return await render_bag(user_id)
     rows = button_grid(buttons)
     rows.append([InlineKeyboardButton(text="↩️ 返回储物袋", callback_data="nav:bag")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)

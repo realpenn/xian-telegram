@@ -42,6 +42,10 @@ DAO_MAX_PROFILES = {
     key: {**GEARED, "dao_path": key, "dao_rank": len(DAO.RANK_NAMES) - 1}
     for key in DAO.DAO_PATHS
 }
+DAO_MAX_REFINED_PROFILES = {
+    key: {**profile, "dao_refine": DAO.REFINE_MAX_LEVEL}
+    for key, profile in DAO_MAX_PROFILES.items()
+}
 
 # 每张图/秘境对应的"解锁境界"。
 CONTENT_REALM = {"后山": 0, "妖兽森林": 1, "万妖岭": 2, "上古战场": 3, "星陨海": 4}
@@ -67,7 +71,9 @@ def build_player_stats(realm: int, stage: int, profile=GEARED) -> dict:
                     pct_bonus[sk] += float(v)
             else:
                 base[k] = base.get(k, 0) + v
-    for k, v in DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0)).items():
+    for k, v in DAO.bonuses_for(
+            profile.get("dao_path", ""), profile.get("dao_rank", 0),
+            profile.get("dao_refine", 0)).items():
         if k.endswith("_pct"):
             sk = k[:-4]
             if sk in pct_bonus:
@@ -181,17 +187,23 @@ def world_boss_kill_challenges(boss_key: str, realm: int, stage: int, n: int = 2
 
 
 def breakthrough_rate_with_profile(base_rate: float, profile=GEARED) -> float:
-    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    bonus = DAO.bonuses_for(
+        profile.get("dao_path", ""), profile.get("dao_rank", 0),
+        profile.get("dao_refine", 0))
     return min(0.95, base_rate + float(bonus.get("alchemy_pct", 0)))
 
 
 def forge_quality_score(profile=GEARED) -> float:
-    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    bonus = DAO.bonuses_for(
+        profile.get("dao_path", ""), profile.get("dao_rank", 0),
+        profile.get("dao_refine", 0))
     return 1.0 + float(bonus.get("forge_pct", 0))
 
 
 def seclusion_efficiency(profile=GEARED) -> float:
-    bonus = DAO.bonuses_for(profile.get("dao_path", ""), profile.get("dao_rank", 0))
+    bonus = DAO.bonuses_for(
+        profile.get("dao_path", ""), profile.get("dao_rank", 0),
+        profile.get("dao_refine", 0))
     return 1.0 + min(BUFFS.SECLUSION_PCT_CAP, max(0.0, float(bonus.get("seclusion_pct", 0))))
 
 
@@ -333,6 +345,20 @@ def report() -> None:
         e = dungeon_clear_fraction(r, 0, dkey, profile=profile)
         f = dungeon_clear_fraction(r, last, dkey, profile=profile)
         print(f"  {d['name']:<10}(r{r}) 入门 {e*100:5.1f}% {_bar(e):<20} 圆满 {f*100:5.1f}%")
+    print("-" * 78)
+    print("道途淬炼护栏: 满淬炼体修秘境推进 / 剑修入门 Boss 门槛")
+    body = DAO_MAX_PROFILES["body"]
+    body_refined = DAO_MAX_REFINED_PROFILES["body"]
+    sword = DAO_MAX_PROFILES["sword"]
+    sword_refined = DAO_MAX_REFINED_PROFILES["sword"]
+    body_taixu = dungeon_clear_fraction(4, 0, "taixu", profile=body)
+    body_taixu_refined = dungeon_clear_fraction(4, 0, "taixu", profile=body_refined)
+    sword_xingyun = winrate(4, 0, MAPS["星陨海"]["boss"], profile=sword)
+    sword_xingyun_refined = winrate(4, 0, MAPS["星陨海"]["boss"], profile=sword_refined)
+    print(f"  体修 太虚天门(r4入门) 未淬炼 {body_taixu*100:5.1f}%"
+          f" → 满淬炼 {body_taixu_refined*100:5.1f}%")
+    print(f"  剑修 星陨海Boss(r4入门) 未淬炼 {sword_xingyun*100:5.1f}%"
+          f" → 满淬炼 {sword_xingyun_refined*100:5.1f}%")
     print("=" * 78)
     print("世界 Boss 单次伤害 & 击杀所需挑战次数(满配)")
     for bkey, cfg in WORLD_BOSSES.items():

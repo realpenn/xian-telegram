@@ -1,5 +1,6 @@
 from config import buffs as BUFFS
 from config import dao_paths as DAO
+from config.maps import MAPS
 from config import realms as R
 from tools import balance_sim as B
 
@@ -53,7 +54,8 @@ def test_talisman_path_leads_seclusion_metric():
 
 def test_max_dao_paths_remain_under_stat_caps():
     raw = R.base_stats(3, 3)
-    for profile in B.DAO_MAX_PROFILES.values():
+    profiles = list(B.DAO_MAX_PROFILES.values()) + list(B.DAO_MAX_REFINED_PROFILES.values())
+    for profile in profiles:
         st = B.build_player_stats(3, 3, profile)
         assert st["atk"] <= int((raw["atk"] + 38) * (1 + BUFFS.ATTACK_PCT_CAP))
         assert st["hp"] <= int((raw["hp"] + 160) * (1 + BUFFS.SURVIVAL_PCT_CAP))
@@ -70,3 +72,22 @@ def test_each_dao_path_has_continuous_sink_metric():
 
     assert set(metrics) == set(DAO.DAO_PATHS)
     assert all(value > 0 for value in metrics.values())
+
+
+def test_refined_body_taixu_progression_is_modeled():
+    base = B.dungeon_clear_fraction(
+        4, 0, "taixu", profile=B.DAO_MAX_PROFILES["body"], n=80)
+    refined = B.dungeon_clear_fraction(
+        4, 0, "taixu", profile=B.DAO_MAX_REFINED_PROFILES["body"], n=80)
+
+    assert refined >= base + 0.30
+    assert refined < 0.90
+
+
+def test_refined_sword_keeps_xingyun_entry_boss_gate():
+    boss = MAPS["星陨海"]["boss"]
+    base = B.winrate(4, 0, boss, profile=B.DAO_MAX_PROFILES["sword"], n=120)
+    refined = B.winrate(4, 0, boss, profile=B.DAO_MAX_REFINED_PROFILES["sword"], n=120)
+
+    assert refined <= base + 0.05
+    assert refined < 0.75

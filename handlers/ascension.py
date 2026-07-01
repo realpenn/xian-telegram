@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import ascension as CFG
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show)
 from services import ascension, character
 
 router = Router()
@@ -28,16 +29,17 @@ async def render_ascension(user_id: int):
         f"飞升试炼：化神圆满可挑战，消耗道行 {CFG.TRIAL_DAOHANG_COST}，得飞升点 {CFG.TRIAL_POINT_REWARD}。",
         "—— 被动 ——",
     ]
-    rows = [[InlineKeyboardButton(
+    buttons = [InlineKeyboardButton(
         text="挑战飞升试炼",
-        callback_data=await action_callback_data(user_id, "asc:trial"))]]
+        callback_data=await action_callback_data(user_id, "asc:trial"))]
     for key, name in CFG.PASSIVES.items():
         lvl = int(spent.get(key, 0))
         lines.append(f"{name}：{lvl}/{CFG.PASSIVE_CAP}（每级 +1%）")
         if lvl < CFG.PASSIVE_CAP:
-            rows.append([InlineKeyboardButton(
+            buttons.append(InlineKeyboardButton(
                 text=f"升级 {name}",
-                callback_data=await action_callback_data(user_id, f"asc:up:{key}"))])
+                callback_data=await action_callback_data(user_id, f"asc:up:{key}")))
+    rows = button_grid(buttons)
     append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 

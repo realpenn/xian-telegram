@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config import dao_paths as CFG
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show)
 from services import character, dao_path
 
 router = Router()
@@ -25,7 +26,7 @@ async def render_path(user_id: int):
     if not char:
         return NEED_START, None
     paths = await dao_path.list_paths(user_id)
-    rows = []
+    buttons = []
     lines = ["🧭 道途", f"道行：{char.daohang}"]
     if paths:
         lines.append("—— 已悟道途 ——")
@@ -34,13 +35,13 @@ async def render_path(user_id: int):
             mark = "（当前）" if p["active"] else ""
             lines.append(f"{p['name']}·{p['rank_name']}{mark}：{_bonus_text(p['bonuses'])}")
             if p["active"]:
-                rows.append([InlineKeyboardButton(
+                buttons.append(InlineKeyboardButton(
                     text=f"升阶 {p['name']}",
-                    callback_data=await action_callback_data(user_id, f"path:rank:{p['path_key']}"))])
+                    callback_data=await action_callback_data(user_id, f"path:rank:{p['path_key']}")))
             else:
-                rows.append([InlineKeyboardButton(
+                buttons.append(InlineKeyboardButton(
                     text=f"转修 {p['name']}",
-                    callback_data=await action_callback_data(user_id, f"path:switch:{p['path_key']}"))])
+                    callback_data=await action_callback_data(user_id, f"path:switch:{p['path_key']}")))
     else:
         unlocked = set()
         lines.append(f"元婴初期起可择一道途，首条免费。当前需至 {CFG.UNLOCK_REALM} 阶境界。")
@@ -48,9 +49,10 @@ async def render_path(user_id: int):
         if key in unlocked:
             continue
         lines.append(f"{cfg['name']}：{cfg['role']}")
-        rows.append([InlineKeyboardButton(
+        buttons.append(InlineKeyboardButton(
             text=f"选择 {cfg['name']}",
-            callback_data=await action_callback_data(user_id, f"path:unlock:{key}"))])
+            callback_data=await action_callback_data(user_id, f"path:unlock:{key}")))
+    rows = button_grid(buttons)
     append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 

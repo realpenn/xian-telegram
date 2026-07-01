@@ -318,3 +318,49 @@ async def test_daily_checkin_once_per_day(temp_db):
     assert first["status"] == "ok"
     assert second["status"] == "done"
     assert first["streak"] == second["streak"] == 1
+
+
+@pytest.mark.asyncio
+async def test_daily_checkin_grants_bound_huashen_aid_at_yuanying_full(temp_db):
+    uid = 3015
+    await character.create(uid, "daily-huashen")
+    last_yy = R.num_stages(3) - 1
+    await character.set_progress(uid, 3, last_yy, R.advance_cost(3, last_yy))
+
+    first = await daily.checkin(uid, now=1000)
+    second = await daily.checkin(uid, now=1001)
+
+    assert first["status"] == "ok"
+    assert first["extra_items"] == [{
+        "item": "化神丹",
+        "qty": 1,
+        "bound": 1,
+        "reason": "yuanying_full_aid",
+    }]
+    assert second["status"] == "done"
+    assert await character.item_qty(uid, "化神丹", bound=1) == 1
+    assert await character.item_qty(uid, "化神丹", bound=0) == 0
+
+
+@pytest.mark.asyncio
+async def test_daily_huashen_aid_requires_full_cultivation_and_does_not_stockpile(temp_db):
+    last_yy = R.num_stages(3) - 1
+    cost = R.advance_cost(3, last_yy)
+
+    not_full = 3016
+    await character.create(not_full, "not-full")
+    await character.set_progress(not_full, 3, last_yy, cost - 1)
+    res = await daily.checkin(not_full, now=1000)
+    assert res["status"] == "ok"
+    assert res["extra_items"] == []
+    assert await character.item_qty(not_full, "化神丹") == 0
+
+    already_has = 3017
+    await character.create(already_has, "already-has")
+    await character.set_progress(already_has, 3, last_yy, cost)
+    await character.add_item(already_has, "化神丹", 1, bound=0)
+    res = await daily.checkin(already_has, now=1000)
+    assert res["status"] == "ok"
+    assert res["extra_items"] == []
+    assert await character.item_qty(already_has, "化神丹", bound=0) == 1
+    assert await character.item_qty(already_has, "化神丹", bound=1) == 0

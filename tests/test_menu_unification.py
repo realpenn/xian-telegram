@@ -11,7 +11,7 @@ from handlers import (ascension as ascension_handler, bag as bag_handler,
                       skills as skills_handler, weekly_events as weekly_handler)
 from handlers.common import main_menu, section_back_markup
 from models import db
-from services import character
+from services import character, market as market_service
 
 
 @pytest_asyncio.fixture
@@ -77,7 +77,7 @@ async def test_secondary_pages_keep_contextual_back_links_without_full_menu(temp
 
     secondary_pages = [
         ("商店分类", await shop_handler.render_category(uid, "material"), {"nav:shop"}),
-        ("坊市定价", await market_handler.render_price_editor(uid, "灵草", 100), {"nav:market"}),
+        ("坊市定价", await market_handler.render_price_editor(uid, "灵草", 100), {"market:cat:sell"}),
         ("宗门商店", await sect_handler.render_sect_shop(uid), {"nav:sect"}),
     ]
 
@@ -86,6 +86,52 @@ async def test_secondary_pages_keep_contextual_back_links_without_full_menu(temp
         assert expected_back_links <= datas, name
         assert not ((PRIMARY_NAVS - expected_back_links) & datas), name
         assert "nav:menu" not in datas, name
+
+
+@pytest.mark.asyncio
+async def test_dense_feature_home_pages_link_to_categories_before_actions(temp_db):
+    uid = 5202
+    seller = 5203
+    await character.create(uid, "dense-menu")
+    await character.create(seller, "seller")
+    await character.set_progress(uid, 1, 0, 0)
+    await character.add_item(uid, "灵草", 3)
+    await character.add_item(uid, "疗伤丹", 1)
+    await character.add_item(uid, "归元心法残页", 3)
+    await character.create_item_instance(uid, "玄铁剑")
+    await character.add_item(seller, "星陨砂", 1)
+    await market_service.create_listing(seller, "星陨砂", 1, 100, now=1000)
+
+    _text, craft_home = await craft_handler.render_craft(uid)
+    craft_home_datas = _datas(craft_home)
+    assert {"craft:cat:alchemy", "craft:cat:forge"} <= set(craft_home_datas)
+    assert not any(data.startswith("craft:start:") for data in craft_home_datas)
+    _text, craft_cat = await craft_handler.render_craft_category(uid, "alchemy")
+    assert any(data.startswith("craft:start:") for data in _datas(craft_cat))
+
+    _text, bag_home = await bag_handler.render_bag(uid)
+    bag_home_datas = _datas(bag_home)
+    assert {"bag:cat:usable", "bag:cat:material", "bag:cat:equipment"} <= set(bag_home_datas)
+    assert not any(data.startswith("bag:use:") for data in bag_home_datas)
+    _text, bag_cat = await bag_handler.render_bag_category(uid, "usable")
+    assert any(data.startswith("bag:use:") for data in _datas(bag_cat))
+
+    _text, market_home = await market_handler.render_market(uid)
+    market_home_datas = _datas(market_home)
+    assert {"market:cat:buy", "market:cat:sell"} <= set(market_home_datas)
+    assert not any(data.startswith(("market:buy:", "market:list:", "market:cancel:"))
+                   for data in market_home_datas)
+    _text, market_buy = await market_handler.render_market_category(uid, "buy")
+    assert any(data.startswith("market:buy:") for data in _datas(market_buy))
+    _text, market_sell = await market_handler.render_market_category(uid, "sell")
+    assert any(data.startswith("market:list:") for data in _datas(market_sell))
+
+    _text, skills_home = await skills_handler.render_skills(uid)
+    skills_home_datas = _datas(skills_home)
+    assert {"skills:cat:equipment", "skills:cat:pages"} <= set(skills_home_datas)
+    assert not any(data.startswith(("equip:", "eq:", "learn:")) for data in skills_home_datas)
+    _text, skills_equipment = await skills_handler.render_skills_category(uid, "equipment")
+    assert any(data.startswith("eq:enhance:") for data in _datas(skills_equipment))
 
 
 def test_action_result_markup_returns_to_section_or_main_menu():

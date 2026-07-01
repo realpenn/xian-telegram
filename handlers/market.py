@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import is_tradable, item_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show)
 from services import character, market
 
 router = Router()
@@ -16,6 +17,10 @@ DEFAULT_LIST_PRICE = 100
 LIST_PRICE_STEP = 100
 MIN_LIST_PRICE = 100
 MAX_LIST_PRICE = 10_000_000
+MARKET_CATEGORIES = {
+    "buy": "浏览挂单",
+    "sell": "上架物品",
+}
 
 
 async def render_market(user_id: int):
@@ -24,31 +29,57 @@ async def render_market(user_id: int):
         return NEED_START, None
     listings = await market.list_active()
     inv = [(k, q) for k, q in await character.inventory(user_id, bound=0) if is_tradable(k)]
-    lines = ["🏷️ 坊市", f"🪙 灵石 {char.spirit_stone}", "—— 在售 ——"]
-    rows = []
-    if listings:
-        for row in listings[:10]:
-            lines.append(f"#{row['id']} {row['item']}×{row['qty']}：{row['price']} 灵石")
-            if row["seller_id"] == user_id:
-                rows.append([InlineKeyboardButton(
-                    text=f"撤单 #{row['id']}",
-                    callback_data=await action_callback_data(user_id, f"market:cancel:{row['id']}"))])
-            else:
-                rows.append([InlineKeyboardButton(
-                    text=f"购买 #{row['id']}",
-                    callback_data=await action_callback_data(user_id, f"market:buy:{row['id']}"))])
-    else:
-        lines.append("暂无挂单。")
-    if inv:
-        lines.append("—— 上架（点物品后可 +/-100 调价，绑定物不可上架）——")
-        for key, qty in inv[:8]:
-            lines.append(f"{item_name(key)} ×{qty}")
-            rows.append([InlineKeyboardButton(
-                text=f"上架 {item_name(key)}",
-                callback_data=await action_callback_data(user_id, f"market:list:{key}"))])
-    else:
-        lines.append("无可上架的非绑定物品。")
+    lines = [
+        "🏷️ 坊市",
+        f"🪙 灵石 {char.spirit_stone}",
+        f"在售：{len(listings)} 单 · 可上架：{len(inv)} 种",
+    ]
+    rows = button_grid([
+        InlineKeyboardButton(text="浏览挂单", callback_data="market:cat:buy"),
+        InlineKeyboardButton(text="上架物品", callback_data="market:cat:sell"),
+    ])
     append_main_menu_return(rows)
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_market_category(user_id: int, cat: str):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    if cat not in MARKET_CATEGORIES:
+        return await render_market(user_id)
+
+    listings = await market.list_active()
+    inv = [(k, q) for k, q in await character.inventory(user_id, bound=0) if is_tradable(k)]
+    lines = [f"🏷️ {MARKET_CATEGORIES[cat]}", f"🪙 灵石 {char.spirit_stone}"]
+    buttons = []
+    if cat == "buy":
+        lines.append("—— 在售 ——")
+        if listings:
+            for row in listings[:10]:
+                lines.append(f"#{row['id']} {row['item']}×{row['qty']}：{row['price']} 灵石")
+                if row["seller_id"] == user_id:
+                    buttons.append(InlineKeyboardButton(
+                        text=f"撤单 #{row['id']}",
+                        callback_data=await action_callback_data(user_id, f"market:cancel:{row['id']}")))
+                else:
+                    buttons.append(InlineKeyboardButton(
+                        text=f"购买 #{row['id']}",
+                        callback_data=await action_callback_data(user_id, f"market:buy:{row['id']}")))
+        else:
+            lines.append("暂无挂单。")
+    else:
+        lines.append("—— 上架（点物品后可 +/-100 调价，绑定物不可上架）——")
+        if inv:
+            for key, qty in inv[:8]:
+                lines.append(f"{item_name(key)} ×{qty}")
+                buttons.append(InlineKeyboardButton(
+                    text=f"上架 {item_name(key)}",
+                    callback_data=await action_callback_data(user_id, f"market:list:{key}")))
+        else:
+            lines.append("无可上架的非绑定物品。")
+    rows = button_grid(buttons)
+    rows.append([InlineKeyboardButton(text="↩️ 返回坊市", callback_data="nav:market")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -76,8 +107,8 @@ async def render_price_editor(user_id: int, key: str, price: int):
             text=f"✅ 确认上架（{price} 灵石）",
             callback_data=await action_callback_data(user_id, f"market:confirm:{key}:{price}"))],
         [InlineKeyboardButton(
-            text="↩️ 返回坊市",
-            callback_data="nav:market")],
+            text="↩️ 返回上架",
+            callback_data="market:cat:sell")],
     ]
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -122,6 +153,16 @@ async def cb_market(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
     text, markup = await render_market(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("market:cat:"))
+async def cb_market_category(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    cat = callback.data.split(":", 2)[2]
+    text, markup = await render_market_category(callback.from_user.id, cat)
     await show(callback, text, markup)
     await callback.answer()
 

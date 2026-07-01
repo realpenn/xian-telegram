@@ -10,11 +10,19 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config.items import item_name
 from config.recipes import RECIPES
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show)
 from services import character, crafting
 
 router = Router()
+
+CRAFT_CATEGORIES = [
+    ("alchemy", "炼丹", "💊 炼丹"),
+    ("forge", "炼器", "⚒️ 炼器"),
+]
+_CAT_TITLE = {cat: title for cat, title, _ in CRAFT_CATEGORIES}
+_CAT_ICON = {"alchemy": "💊", "forge": "⚒️"}
 
 
 def _duration(seconds: int) -> str:
@@ -47,13 +55,47 @@ async def render_craft(user_id: int):
             text=f"🪙 灵石加速（{crafting.accelerate_cost(remain)}）",
             callback_data=await action_callback_data(user_id, "craft:fast"))])
     else:
-        lines.append("选择一张丹方或图纸下炉：")
-        for key, recipe in await crafting.available_recipes(user_id):
-            mats = "、".join(f"{item_name(k)}×{v}" for k, v in recipe["materials"].items())
-            rows.append([InlineKeyboardButton(
-                text=f"{recipe['name']}（{mats} / 🪙{recipe['stone']}）",
-                callback_data=await action_callback_data(user_id, f"craft:start:{key}"))])
+        recipes = await crafting.available_recipes(user_id)
+        grouped = {
+            cat: [(key, recipe) for key, recipe in recipes if recipe["type"] == cat]
+            for cat, _, _ in CRAFT_CATEGORIES
+        }
+        counts = [f"{title} {len(grouped[cat])}"
+                  for cat, title, _ in CRAFT_CATEGORIES if grouped[cat]]
+        lines.append("可炼：" + (" · ".join(counts) if counts else "筑基后方可稳控炉火"))
+        entries = [
+            InlineKeyboardButton(text=label, callback_data=f"craft:cat:{cat}")
+            for cat, _, label in CRAFT_CATEGORIES if grouped[cat]
+        ]
+        rows += button_grid(entries)
     append_main_menu_return(rows)
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_craft_category(user_id: int, cat: str):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    if cat not in _CAT_TITLE:
+        return await render_craft(user_id)
+    recipes = [
+        (key, recipe)
+        for key, recipe in await crafting.available_recipes(user_id)
+        if recipe["type"] == cat
+    ]
+    if not recipes:
+        return await render_craft(user_id)
+
+    lines = [f"{_CAT_ICON[cat]} {_CAT_TITLE[cat]}"]
+    buttons = []
+    for key, recipe in recipes:
+        mats = "、".join(f"{item_name(k)}×{v}" for k, v in recipe["materials"].items())
+        lines.append(f"- {recipe['name']}：{mats} / 🪙{recipe['stone']} / {_duration(recipe['seconds'])}")
+        buttons.append(InlineKeyboardButton(
+            text=f"{recipe['name']} {recipe['stone']}",
+            callback_data=await action_callback_data(user_id, f"craft:start:{key}")))
+    rows = button_grid(buttons)
+    rows.append([InlineKeyboardButton(text="↩️ 返回炼制", callback_data="nav:craft")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -96,6 +138,16 @@ async def cb_craft(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
     text, markup = await render_craft(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("craft:cat:"))
+async def cb_craft_category(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    cat = callback.data.split(":", 2)[2]
+    text, markup = await render_craft_category(callback.from_user.id, cat)
     await show(callback, text, markup)
     await callback.answer()
 

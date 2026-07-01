@@ -8,7 +8,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 from config.items import item_name
 from config.sects import CREATE_STONE_COST, SECT_SHOP, upgrade_cost, upgrade_stone_cost
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             section_back_markup, show)
 from services import sect
 
 router = Router()
@@ -47,12 +48,13 @@ async def render_sect(user_id: int):
 
 
 async def render_sect_shop(user_id: int):
-    rows = [
-        [InlineKeyboardButton(
+    buttons = [
+        InlineKeyboardButton(
             text=f"{item_name(key)}（贡献 {good['contribution']}）",
-            callback_data=await action_callback_data(user_id, f"sect:buy:{key}"))]
+            callback_data=await action_callback_data(user_id, f"sect:buy:{key}"))
         for key, good in SECT_SHOP.items()
     ]
+    rows = button_grid(buttons)
     rows.append([InlineKeyboardButton(text="↩️ 返回宗门", callback_data="nav:sect")])
     return "🏪 宗门商店", InlineKeyboardMarkup(inline_keyboard=rows)
 

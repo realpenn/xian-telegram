@@ -9,16 +9,31 @@ from config.items import ITEMS, equipment_slot, item_name
 from config.equipment import QIHUN_KEY
 from config.skills import MIND_SLOT, skill_name
 from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
-                             consume_action_callback, guard_private_callback,
-                             guard_private_message, section_back_markup, show)
+                             button_grid, consume_action_callback,
+                             guard_private_callback, guard_private_message,
+                             section_back_markup, show)
 from services import character, equipment
 
 router = Router()
+
+SKILL_CATEGORIES = {
+    "equipment": "法宝",
+    "pages": "可领悟",
+}
 
 
 def _bonus_text(inst: dict) -> str:
     bonus = character.equipment_bonus(inst)
     return "、".join(f"{k}+{v}" for k, v in bonus.items()) or "无词条"
+
+
+def _learnable_pages(inv: list[tuple[str, int]]) -> list[tuple[str, int, dict]]:
+    pages = []
+    for key, qty in inv:
+        item = ITEMS.get(key, {})
+        if item.get("type") == "page" and qty >= item.get("need", 999):
+            pages.append((key, qty, item))
+    return pages
 
 
 async def render_skills(user_id: int):
@@ -29,15 +44,46 @@ async def render_skills(user_id: int):
     skills = await character.get_skills(user_id)
     instances = await character.item_instances(user_id)
     inv = await character.inventory(user_id)
+    learnable = _learnable_pages(inv)
     lines = [
         "📖 功法 / 法宝",
         "心法：" + (skill_name(mind) if mind else "无"),
         "战技栏：" + ("、".join(skill_name(s) for s in skills) if skills else "无"),
     ]
+    qihun = dict(inv).get(QIHUN_KEY, 0)
+    counts = []
+    if instances:
+        counts.append(f"法宝 {len(instances)}")
+    if learnable:
+        counts.append(f"可领悟 {len(learnable)}")
+    lines.append(f"器魂：{qihun}")
+    lines.append("操作：" + (" · ".join(counts) if counts else "暂无可操作项目"))
+    entries = []
+    if instances:
+        entries.append(InlineKeyboardButton(text="法宝", callback_data="skills:cat:equipment"))
+    if learnable:
+        entries.append(InlineKeyboardButton(text="可领悟", callback_data="skills:cat:pages"))
+    rows = button_grid(entries)
+    append_main_menu_return(rows)
+    return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_skills_category(user_id: int, cat: str):
+    char = await character.get(user_id)
+    if not char:
+        return NEED_START, None
+    if cat not in SKILL_CATEGORIES:
+        return await render_skills(user_id)
+    instances = await character.item_instances(user_id)
+    inv = await character.inventory(user_id)
+    lines = [f"📖 {SKILL_CATEGORIES[cat]}"]
     rows = []
     if instances:
         qihun = dict(inv).get(QIHUN_KEY, 0)
-        lines.append(f"—— 法宝 ——（器魂 ×{qihun}，可用于强化/重铸）")
+    else:
+        qihun = 0
+    if cat == "equipment" and instances:
+        lines.append(f"器魂 ×{qihun}，可用于强化/重铸。")
         for inst in instances:
             mark = "已装备" if inst["equipped_slot"] else "未装备"
             lvl = inst.get("enhance_level", 0)
@@ -62,20 +108,17 @@ async def render_skills(user_id: int):
                         text=f"分解#{inst['id']}",
                         callback_data=await action_callback_data(user_id, f"eq:decompose:{inst['id']}")))
                 rows.append(ops)
-    else:
-        lines.append("尚无法宝实例，可由炼器或秘境获得。")
-
-    page_buttons = []
-    for key, qty in inv:
-        item = ITEMS.get(key, {})
-        if item.get("type") == "page" and qty >= item.get("need", 999):
-            page_buttons.append([InlineKeyboardButton(
+    elif cat == "pages":
+        page_buttons = []
+        for key, qty, item in _learnable_pages(inv):
+            lines.append(f"{item_name(key)} {qty}/{item['need']}：{skill_name(item['skill'])}")
+            page_buttons.append(InlineKeyboardButton(
                 text=f"领悟 {skill_name(item['skill'])}",
-                callback_data=await action_callback_data(user_id, f"learn:{key}"))])
-    if page_buttons:
-        lines.append("残页已足，可领悟新功法。")
-        rows += page_buttons
-    append_main_menu_return(rows)
+                callback_data=await action_callback_data(user_id, f"learn:{key}")))
+        rows += button_grid(page_buttons)
+    if len(lines) == 1:
+        return await render_skills(user_id)
+    rows.append([InlineKeyboardButton(text="↩️ 返回功法", callback_data="nav:skills")])
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -108,6 +151,16 @@ async def cb_skills(callback: CallbackQuery):
     if await guard_private_callback(callback):
         return
     text, markup = await render_skills(callback.from_user.id)
+    await show(callback, text, markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("skills:cat:"))
+async def cb_skills_category(callback: CallbackQuery):
+    if await guard_private_callback(callback):
+        return
+    cat = callback.data.split(":", 2)[2]
+    text, markup = await render_skills_category(callback.from_user.id, cat)
     await show(callback, text, markup)
     await callback.answer()
 

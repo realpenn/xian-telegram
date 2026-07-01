@@ -114,6 +114,12 @@ def append_main_menu_return(
     return rows
 
 
+def button_grid(
+        buttons: list[InlineKeyboardButton],
+        width: int = 2) -> list[list[InlineKeyboardButton]]:
+    return [buttons[i:i + width] for i in range(0, len(buttons), width)]
+
+
 def main_menu_return_markup(text: str = "🏯 返回主菜单") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[main_menu_return_button(text)]])
 

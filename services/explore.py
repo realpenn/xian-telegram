@@ -403,7 +403,9 @@ async def _resolve(user_id: int, map_key: str, seed: int, now: int, rng=None, co
     win = True
     defeat_reason = None
     for idx, mob_src in enumerate(mob_sources, 1):
-        result = simulate(player, _combatant_from_mob(mob_src), seed=rng.randint(1, 10_000_000))
+        result = simulate(
+            player, _combatant_from_mob(mob_src),
+            seed=rng.randint(1, 10_000_000), max_rounds=None)
         logs.append(f"第 {idx} 战：遭遇 {mob_src['name']}")
         shown = result["log"] if len(result["log"]) <= 5 else (result["log"][:4] + ["……", result["log"][-1]])
         logs.extend(shown[1:])

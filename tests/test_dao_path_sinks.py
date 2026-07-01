@@ -21,8 +21,8 @@ def test_body_path_leads_dungeon_clear_not_boss_damage():
     sword = B.DAO_MAX_PROFILES["sword"]
     body = B.DAO_MAX_PROFILES["body"]
 
-    body_dungeon = B.dungeon_clear_fraction(3, 0, "tianxu", profile=body, n=80)
-    sword_dungeon = B.dungeon_clear_fraction(3, 0, "tianxu", profile=sword, n=80)
+    body_dungeon = B.dungeon_clear_fraction(2, 0, "qingyun", profile=body, n=80)
+    sword_dungeon = B.dungeon_clear_fraction(2, 0, "qingyun", profile=sword, n=80)
     body_damage = B.boss_damage_per_challenge(3, 3, "yuanying", profile=body, n=80)
     sword_damage = B.boss_damage_per_challenge(3, 3, "yuanying", profile=sword, n=80)
 

@@ -1,14 +1,19 @@
 """玩家一口价坊市（v2 M5）。"""
 from __future__ import annotations
 
+import logging
 import time
 
 from config.items import is_tradable, item_name
 from models import db
 from services import character
 
+log = logging.getLogger("xian.market")
+
 MARKET_TAX_RATE = 0.05
 MIN_PRICE = 1
+MARKET_BROADCAST_WINDOW = 3600
+MARKET_BROADCAST_LIMIT = 10
 
 
 async def list_active(limit: int = 20) -> list[dict]:
@@ -108,6 +113,94 @@ async def audit_suspicious(limit_price: int = 1_000_000) -> list[dict]:
         "SELECT * FROM market_listings WHERE price>=? ORDER BY price DESC",
         (limit_price,))
     return [_format(row) for row in rows]
+
+
+async def notify_recent_listings(bot, now: int = None) -> dict:
+    """每小时向已知群汇总新上架的在售挂单；无新单则静默。"""
+    now = int(time.time()) if now is None else now
+    chats = await db.fetchall("SELECT chat_id FROM bot_chats ORDER BY last_seen_at DESC")
+    sent = failed = skipped = listings = 0
+    for chat in chats:
+        res = await _notify_recent_listings_for_chat(bot, chat["chat_id"], now)
+        if res["status"] == "sent":
+            sent += 1
+            listings += res["listings"]
+        elif res["status"] == "failed":
+            failed += 1
+        else:
+            skipped += 1
+    return {"sent": sent, "failed": failed, "skipped": skipped, "listings": listings}
+
+
+async def _notify_recent_listings_for_chat(bot, chat_id: int, now: int) -> dict:
+    since = await _last_market_broadcast_at(chat_id, now)
+    rows = await _new_active_listings(since, now, MARKET_BROADCAST_LIMIT)
+    total = await _new_active_listing_count(since, now)
+    if total <= 0:
+        await _remember_market_broadcast(chat_id, now)
+        return {"status": "skipped", "listings": 0}
+
+    text = _recent_listings_text(rows, total)
+    try:
+        await bot.send_message(chat_id, text)
+    except Exception as exc:
+        log.warning(
+            "market broadcast send failed chat_id=%s listings=%s: %s",
+            chat_id, total, exc)
+        await _remember_market_broadcast(chat_id, now)
+        return {"status": "failed", "listings": total}
+    await _remember_market_broadcast(chat_id, now)
+    return {"status": "sent", "listings": total}
+
+
+async def _last_market_broadcast_at(chat_id: int, now: int) -> int:
+    row = await db.fetchone(
+        "SELECT last_notified_at FROM market_broadcast_state WHERE chat_id=?",
+        (chat_id,))
+    if row:
+        return int(row["last_notified_at"])
+    return now - MARKET_BROADCAST_WINDOW - 1
+
+
+async def _remember_market_broadcast(chat_id: int, now: int):
+    await db.execute(
+        "INSERT INTO market_broadcast_state(chat_id, last_notified_at) VALUES(?,?) "
+        "ON CONFLICT(chat_id) DO UPDATE SET last_notified_at=?",
+        (chat_id, now, now))
+
+
+async def _new_active_listings(since: int, now: int, limit: int) -> list[dict]:
+    rows = await db.fetchall(
+        "SELECT l.*, u.username FROM market_listings l "
+        "LEFT JOIN users u ON u.tg_user_id=l.seller_id "
+        "WHERE l.status='active' AND l.created_at>? AND l.created_at<=? "
+        "ORDER BY l.created_at, l.id LIMIT ?",
+        (since, now, limit))
+    return [dict(row) for row in rows]
+
+
+async def _new_active_listing_count(since: int, now: int) -> int:
+    row = await db.fetchone(
+        "SELECT COUNT(*) AS n FROM market_listings "
+        "WHERE status='active' AND created_at>? AND created_at<=?",
+        (since, now))
+    return int(row["n"] or 0)
+
+
+def _recent_listings_text(rows: list[dict], total: int) -> str:
+    lines = [
+        "🏷️ 坊市上新",
+        f"本轮有 {total} 单新上架：",
+    ]
+    for idx, row in enumerate(rows, start=1):
+        seller = row.get("username") or f"道友{row['seller_id']}"
+        lines.append(
+            f"{idx}. #{row['id']} {item_name(row['item_key'])}×{row['qty']} "
+            f"· {row['price']}灵石 · {seller}")
+    if total > len(rows):
+        lines.append(f"另有 {total - len(rows)} 单可在 /market 查看。")
+    lines.append("发送 /market 查看和购买。")
+    return "\n".join(lines)
 
 
 def _format(row) -> dict:

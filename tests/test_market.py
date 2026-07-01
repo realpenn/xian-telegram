@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 import pytest_asyncio
 
@@ -147,3 +149,95 @@ async def test_custom_price_listing_is_honored(temp_db):
     res = await market.create_listing(uid, "星陨砂", 1, 777, now=1000)
 
     assert res["status"] == "ok" and res["price"] == 777
+
+
+@pytest.mark.asyncio
+async def test_market_hourly_broadcast_sends_recent_listings_once(temp_db):
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, chat_id, text):
+            self.sent.append((chat_id, text))
+
+    seller = 9712
+    chat_id = -5801
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "坊市群", 900))
+    await character.create(seller, "seller-news")
+    await character.add_item(seller, "星陨砂", 1)
+    await market.create_listing(seller, "星陨砂", 1, 888, now=1000)
+
+    bot = FakeBot()
+    res = await market.notify_recent_listings(bot, now=4600)
+    again = await market.notify_recent_listings(bot, now=8200)
+
+    assert res == {"sent": 1, "failed": 0, "skipped": 0, "listings": 1}
+    assert again == {"sent": 0, "failed": 0, "skipped": 1, "listings": 0}
+    assert len(bot.sent) == 1
+    sent_chat, text = bot.sent[0]
+    assert sent_chat == chat_id
+    assert "坊市上新" in text
+    assert "星陨砂×1" in text
+    assert "888灵石" in text
+    assert "seller-news" in text
+    assert "/market" in text
+
+
+@pytest.mark.asyncio
+async def test_market_hourly_broadcast_is_quiet_without_new_listings(temp_db):
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, chat_id, text):
+            self.sent.append((chat_id, text))
+
+    seller = 9713
+    chat_id = -5802
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "清静群", 900))
+
+    bot = FakeBot()
+    quiet = await market.notify_recent_listings(bot, now=4600)
+
+    await character.create(seller, "late-seller")
+    await character.add_item(seller, "幽都魂晶", 1)
+    await market.create_listing(seller, "幽都魂晶", 1, 666, now=4700)
+    later = await market.notify_recent_listings(bot, now=8300)
+
+    assert quiet == {"sent": 0, "failed": 0, "skipped": 1, "listings": 0}
+    assert later == {"sent": 1, "failed": 0, "skipped": 0, "listings": 1}
+    assert len(bot.sent) == 1
+    assert "幽都魂晶×1" in bot.sent[0][1]
+
+
+@pytest.mark.asyncio
+async def test_market_broadcast_failure_logs_and_advances_window(temp_db, caplog):
+    class FailingBot:
+        async def send_message(self, chat_id, text):
+            raise RuntimeError("bot kicked")
+
+    seller = 9714
+    chat_id = -5803
+    await db.execute(
+        "INSERT INTO bot_chats(chat_id, title, last_seen_at) VALUES(?,?,?)",
+        (chat_id, "失联群", 900))
+    await character.create(seller, "blocked-seller")
+    await character.add_item(seller, "星陨砂", 1)
+    await market.create_listing(seller, "星陨砂", 1, 999, now=1000)
+
+    with caplog.at_level(logging.WARNING, logger="xian.market"):
+        failed = await market.notify_recent_listings(FailingBot(), now=4600)
+    later = await market.notify_recent_listings(FailingBot(), now=8200)
+    state = await db.fetchone(
+        "SELECT last_notified_at FROM market_broadcast_state WHERE chat_id=?",
+        (chat_id,))
+
+    assert failed == {"sent": 0, "failed": 1, "skipped": 0, "listings": 0}
+    assert later == {"sent": 0, "failed": 0, "skipped": 1, "listings": 0}
+    assert state["last_notified_at"] == 8200
+    assert "market broadcast send failed" in caplog.text
+    assert "bot kicked" in caplog.text

@@ -14,18 +14,26 @@ HP_FLOOR_PCT = 0.20           # 活动结束写回的重伤地板：胜负都不
 # 保留此常量作为基线（筑基档 24h），仅供外部参考。
 SECLUSION_STAGE_SECONDS = 24 * 3600
 CULTIVATION_SCALE = 1_000_000
-DAOHANG_FULL_REALM_RATE = 0.30
-DAOHANG_PRE_CAP_RATE = 0.15
-# 化神圆满溢出修为额外转飞升点（M3）；与道行并行分流，合计 50% 转化、50% sink 损耗，无双倍发放。
+# 溢出转道行的转化率大幅下调（原 0.30/0.15）：满级挂机 100% 溢出，旧率把道行做成了
+# 绕过「周封顶」设计的无限水管。改为小额转化，另配 OVERFLOW_DAOHANG_WEEKLY_CAP 周上限兜底。
+DAOHANG_FULL_REALM_RATE = 0.08
+DAOHANG_PRE_CAP_RATE = 0.03
+# 溢出转道行的每周入账上限（跨元婴/化神圆满共用）。飞升点分支不在此约束内——它已被
+# 「每周一次试炼 + 被动硬上限」双重锁死，不是水管问题。
+OVERFLOW_DAOHANG_WEEKLY_CAP = 600
+# 化神圆满溢出修为额外转飞升点（M3）；受下游周试炼与被动硬上限约束，故转化率保持不变。
 ASCENSION_FULL_REALM_RATE = 0.20
 
 
 def overflow_split(realm: int, stage: int, cur_cult: int, gain: int) -> tuple[int, int, int]:
     """满级/准满级溢出修为分流，返回 (保留修为, 道行, 飞升点)。
 
-    - 化神圆满：cultivation 封顶 advance_cost；越界 ×30%→道行、×20%→飞升点。
-    - 元婴圆满未化神突破：越界 ×15%→道行，不产飞升点（飞升点要求化神圆满）。
+    - 化神圆满：cultivation 封顶 advance_cost；越界 ×DAOHANG_FULL_REALM_RATE(0.08)→道行、
+      ×ASCENSION_FULL_REALM_RATE(0.20)→飞升点。
+    - 元婴圆满未化神突破：越界 ×DAOHANG_PRE_CAP_RATE(0.03)→道行，不产飞升点（飞升点要求化神圆满）。
     - 其它：原样累加，无转换。
+
+    注：道行转化另受 OVERFLOW_DAOHANG_WEEKLY_CAP 周上限约束（在调用方 character.py 落地）。
     """
     cur_cult = max(0, int(cur_cult))
     gain = max(0, int(gain))

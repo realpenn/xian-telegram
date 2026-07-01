@@ -24,11 +24,11 @@ async def active_path(user_id: int):
 
 async def active_bonuses(user_id: int) -> dict:
     row = await db.fetchone(
-        "SELECT path_key, rank FROM dao_paths WHERE user_id=? AND active=1 LIMIT 1",
+        "SELECT path_key, rank, xp FROM dao_paths WHERE user_id=? AND active=1 LIMIT 1",
         (user_id,))
     if not row:
         return {}
-    return CFG.bonuses_for(row["path_key"], row["rank"])
+    return CFG.bonuses_for(row["path_key"], row["rank"], row["xp"])
 
 
 async def unlock(user_id: int, path_key: str, now: int = None) -> dict:
@@ -107,6 +107,39 @@ async def rank_up(user_id: int, path_key: str = None, now: int = None) -> dict:
              "path": CFG.path_name(row["path_key"]), "rank_name": CFG.rank_name(target_rank)}, now)
         return {"status": "ok", "path": CFG.path_name(row["path_key"]), "rank": target_rank,
                 "rank_name": CFG.rank_name(target_rank), "cost": cost}
+
+
+async def refine(user_id: int, path_key: str = None, now: int = None) -> dict:
+    """道途淬炼：花道行深化本道（升 xp 层，走既有 BUFF clamp），高境界道行的出口。"""
+    now = int(time.time()) if now is None else now
+    async with db.transaction() as conn:
+        row = await _path_row(conn, user_id, path_key)
+        if not row:
+            return {"status": "not_unlocked"}
+        level = int(row["xp"] or 0)
+        if level >= CFG.REFINE_MAX_LEVEL:
+            return {"status": "refine_max", "level": level}
+        cost = CFG.refine_cost(level)
+        cur = await conn.execute("SELECT daohang FROM characters WHERE user_id=?", (user_id,))
+        ch = await cur.fetchone()
+        await cur.close()
+        if not ch:
+            return {"status": "missing"}
+        if ch["daohang"] < cost:
+            return {"status": "no_daohang", "need": cost, "have": ch["daohang"]}
+        await conn.execute(
+            "UPDATE characters SET daohang=daohang-? WHERE user_id=?", (cost, user_id))
+        await conn.execute(
+            "UPDATE dao_paths SET xp=xp+1 WHERE user_id=? AND path_key=?",
+            (user_id, row["path_key"]))
+        new_level = level + 1
+        await conn.execute(
+            "INSERT INTO path_events(user_id, path_key, event_type, amount, created_at) "
+            "VALUES(?,?,?,?,?)",
+            (user_id, row["path_key"], "refine", new_level, now))
+        return {"status": "refine_ok", "path": CFG.path_name(row["path_key"]),
+                "level": new_level, "cost": cost,
+                "bonuses": CFG.bonuses_for(row["path_key"], row["rank"], new_level)}
 
 
 async def switch(user_id: int, path_key: str, now: int = None) -> dict:
@@ -233,7 +266,8 @@ def _format_row(row) -> dict:
         "xp": row["xp"],
         "rank": row["rank"],
         "rank_name": CFG.rank_name(row["rank"]),
+        "refine": row["xp"],
         "active": bool(row["active"]),
         "unlocked_at": row["unlocked_at"],
-        "bonuses": CFG.bonuses_for(row["path_key"], row["rank"]),
+        "bonuses": CFG.bonuses_for(row["path_key"], row["rank"], row["xp"]),
     }

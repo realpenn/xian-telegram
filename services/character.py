@@ -165,6 +165,35 @@ async def _add_daohang_event(conn, user_id: int, amount: int, event_type: str, n
         (user_id, event_type, amount, now))
 
 
+def _overflow_week(now: int) -> str:
+    return time.strftime("%Y-%W", time.localtime(now))
+
+
+async def _cap_overflow_daohang(conn, user_id: int, raw: int, now: int) -> int:
+    """溢出转道行受周上限约束，返回本次实际可入账的道行（已扣减本周已用额度）。
+
+    满级/准满级挂机 100% 溢出，若不封顶会把道行做成绕过周经济的无限水管（元婴大圆满尤甚，
+    该档飞升试炼未解锁、几乎无对口 sink）。计量落 weekly_activity.overflow_daohang。
+    """
+    if raw <= 0:
+        return 0
+    week = _overflow_week(now)
+    cur = await conn.execute(
+        "SELECT overflow_daohang FROM weekly_activity WHERE user_id=? AND week=?",
+        (user_id, week))
+    row = await cur.fetchone()
+    await cur.close()
+    used = row["overflow_daohang"] if row else 0
+    grant = max(0, min(int(raw), settle.OVERFLOW_DAOHANG_WEEKLY_CAP - used))
+    if grant <= 0:
+        return 0
+    await conn.execute(
+        "INSERT INTO weekly_activity(user_id, week, overflow_daohang) VALUES(?,?,?) "
+        "ON CONFLICT(user_id, week) DO UPDATE SET overflow_daohang=overflow_daohang+?",
+        (user_id, week, grant, grant))
+    return grant
+
+
 async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     async with db.transaction() as conn:
@@ -204,6 +233,7 @@ async def touch_activity(user_id: int, username: str, now: int = None) -> dict:
                 _set_seclusion_remainder(state, row["realm"], row["stage"], remainder)
                 new_cult, daohang, asc_pts = settle.overflow_split(
                     row["realm"], row["stage"], row["cultivation"], auto_gain)
+                daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
                 await _add_daohang_event(conn, user_id, daohang, "overflow", now)
                 if asc_pts:
                     await ascension.add_points_conn(conn, user_id, asc_pts, now)
@@ -811,6 +841,7 @@ async def collect_seclusion(user_id: int, now: int = None) -> dict:
         _set_seclusion_remainder(state, row["realm"], row["stage"], remainder_units)
         new_cult, daohang, asc_pts = settle.overflow_split(
             row["realm"], row["stage"], row["cultivation"], gained)
+        daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
         await _add_daohang_event(conn, user_id, daohang, "overflow", now)
         if asc_pts:
             await ascension.add_points_conn(conn, user_id, asc_pts, now)
@@ -840,12 +871,13 @@ async def _grant_reward_conn(conn, user_id: int, stone: int = 0,
         row = await cur.fetchone()
         await cur.close()
         if row:
+            now = int(time.time())
             new_cult, daohang, asc_pts = settle.overflow_split(
                 row["realm"], row["stage"], int(row["cultivation"] or 0), cultivation)
+            daohang = await _cap_overflow_daohang(conn, user_id, daohang, now)
             await conn.execute(
                 "UPDATE characters SET cultivation=?, daohang=daohang+? WHERE user_id=?",
                 (new_cult, daohang, user_id))
-            now = int(time.time())
             await _add_daohang_event(conn, user_id, daohang, "reward", now)
             if asc_pts:
                 await ascension.add_points_conn(conn, user_id, asc_pts, now)

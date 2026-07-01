@@ -14,6 +14,22 @@ SWITCH_TOKEN = "转修令"
 SWITCH_STONE_COST = 2000
 SWITCH_COOLDOWN_SECONDS = 7 * 86400
 
+# 道途淬炼：选定道途后即可花道行深化本道（不 gate 在满阶/宗师后——那需 rank-4 材料，会把
+# 恰恰卡住、缺材料上不去的目标人群挡在门外），为高境界囤积的道行提供出口。
+# 每层按 REFINE_PER_LEVEL_PCT 只叠加到本道途「未触顶」的那个维度（主攻伐/主生存维已贴 25%
+# clamp，加了会被吃掉），仍走既有 BUFF clamp，绝不破天花板。
+REFINE_MAX_LEVEL = 20
+REFINE_PER_LEVEL_PCT = 0.005
+REFINE_COST_BASE = 300     # 淬炼第 L 层（L 从 1 起）花费 = REFINE_COST_BASE * L，递增
+# 各道途淬炼强化的维度：选头部空间最大的次级/功能维，避开近顶的主维度。
+REFINE_STATS = {
+    "sword": "crit_pct",       # atk 近顶 → 强 crit
+    "body": "df_pct",          # hp 近顶 → 强 df
+    "alchemy": "alchemy_pct",  # mp 近顶 → 强丹术（功能维无战力顶）
+    "forge": "forge_pct",      # 强炼器（功能维）
+    "talisman": "seclusion_pct",  # 闭关 clamp 60%，头部空间最大 → 直强本命维
+}
+
 DAO_PATHS = {
     "sword": {
         "name": "剑修",
@@ -83,9 +99,19 @@ def rank_name(rank: int) -> str:
     return RANK_NAMES[-1]
 
 
-def bonuses_for(path_key: str, rank: int) -> dict:
+def refine_cost(level: int) -> int:
+    """从 level（已淬炼层数，0 起）升下一层所需道行。"""
+    return REFINE_COST_BASE * (int(level) + 1)
+
+
+def bonuses_for(path_key: str, rank: int, refine_level: int = 0) -> dict:
     path = DAO_PATHS.get(path_key)
     if not path:
         return {}
     idx = max(0, min(int(rank), len(path["bonuses"]) - 1))
-    return dict(path["bonuses"][idx])
+    bonuses = dict(path["bonuses"][idx])
+    lvl = max(0, min(int(refine_level or 0), REFINE_MAX_LEVEL))
+    stat = REFINE_STATS.get(path_key)
+    if lvl and stat:
+        bonuses[stat] = round(bonuses.get(stat, 0.0) + lvl * REFINE_PER_LEVEL_PCT, 4)
+    return bonuses

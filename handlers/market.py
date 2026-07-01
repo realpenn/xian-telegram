@@ -6,8 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config.items import is_tradable, item_name
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, market
 
 router = Router()
@@ -47,7 +48,7 @@ async def render_market(user_id: int):
                 callback_data=await action_callback_data(user_id, f"market:list:{key}"))])
     else:
         lines.append("无可上架的非绑定物品。")
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -76,7 +77,7 @@ async def render_price_editor(user_id: int, key: str, price: int):
             callback_data=await action_callback_data(user_id, f"market:confirm:{key}:{price}"))],
         [InlineKeyboardButton(
             text="↩️ 返回坊市",
-            callback_data=await action_callback_data(user_id, "market:back:"))],
+            callback_data="nav:market")],
     ]
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -159,5 +160,5 @@ async def cb_market_action(callback: CallbackQuery):
         res = await market.buy(uid, int(value))
     else:
         res = await market.cancel(uid, int(value))
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回坊市", "nav:market"))
     await callback.answer()

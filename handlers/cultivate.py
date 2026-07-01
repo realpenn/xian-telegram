@@ -7,8 +7,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.events import TRIBULATION_ACTIONS
 from handlers.common import (NEED_START, guard_private_callback, guard_private_message,
-                             action_callback_data, consume_action_callback, main_menu,
-                             menu_with_breakthrough, show)
+                             action_callback_data, append_main_menu_return,
+                             consume_action_callback, menu_with_breakthrough,
+                             section_back_markup, show)
 from services import breakthrough, character, cultivation
 
 router = Router()
@@ -21,7 +22,7 @@ async def do_cultivate(user_id: int):
     if char.seclusion_at:
         res = await cultivation.collect(user_id)
         if res["status"] != "collected":
-            return "闭关状态已变，请稍后再试。", main_menu()
+            return "闭关状态已变，请稍后再试。", section_back_markup("↩️ 返回闭关", "nav:cultivate")
         lines = [f"🧘 出关！闭关 {res['minutes']} 分钟，修为精进 +{res['gained']}。",
                  f"修为 {res['cultivation']}/{res['cost']}"]
         if res["can_advance"]:
@@ -29,12 +30,12 @@ async def do_cultivate(user_id: int):
         return "\n".join(lines), await menu_with_breakthrough(user_id, res["can_advance"])
     res = await cultivation.start(user_id)
     if res["status"] == "busy_explore":
-        return "道友正在外历练，须归来后方可闭关。", main_menu()
+        return "道友正在外历练，须归来后方可闭关。", section_back_markup("↩️ 返回闭关", "nav:cultivate")
     if res["status"] == "busy_dungeon":
-        return "道友正在秘境之中，须出秘境后方可闭关。", main_menu()
+        return "道友正在秘境之中，须出秘境后方可闭关。", section_back_markup("↩️ 返回闭关", "nav:cultivate")
     text = ("🧘 道友盘膝而坐，敛息凝神，开始闭关参悟……\n"
             "（修为随时间累积，离线上限 12 时辰。再用一次 /cultivate 或点「闭关」即出关收功。）")
-    return text, main_menu()
+    return text, section_back_markup("↩️ 返回闭关", "nav:cultivate")
 
 
 async def render_cultivate(user_id: int):
@@ -50,7 +51,7 @@ async def render_cultivate(user_id: int):
     rows = [[InlineKeyboardButton(
         text=button,
         callback_data=await action_callback_data(user_id, "cult:toggle"))]]
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -109,13 +110,13 @@ def _bt_text(res: dict) -> str:
 
 async def _bt_markup(user_id: int, res: dict):
     if res["status"] != "tribulation_choice":
-        return main_menu()
+        return section_back_markup("↩️ 返回道行", "nav:me")
     rows = []
     for choice in res.get("choices", []):
         rows.append([InlineKeyboardButton(
             text=choice["label"],
             callback_data=await action_callback_data(user_id, f"bt:trib:{choice['key']}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

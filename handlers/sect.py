@@ -7,8 +7,8 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from config.items import item_name
 from config.sects import CREATE_STONE_COST, SECT_SHOP, upgrade_cost, upgrade_stone_cost
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, section_back_markup, show)
 from services import sect
 
 router = Router()
@@ -42,8 +42,19 @@ async def render_sect(user_id: int):
                       f" + 灵石 {upgrade_stone_cost(mine['level'])}）"),
                 callback_data=await action_callback_data(user_id, "sect:upgrade"))])
         rows.append([InlineKeyboardButton(text="🏪 宗门商店", callback_data="sect:shop")])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def render_sect_shop(user_id: int):
+    rows = [
+        [InlineKeyboardButton(
+            text=f"{item_name(key)}（贡献 {good['contribution']}）",
+            callback_data=await action_callback_data(user_id, f"sect:buy:{key}"))]
+        for key, good in SECT_SHOP.items()
+    ]
+    rows.append([InlineKeyboardButton(text="↩️ 返回宗门", callback_data="nav:sect")])
+    return "🏪 宗门商店", InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def _result_text(res: dict) -> str:
@@ -136,7 +147,8 @@ async def cb_sect(callback: CallbackQuery):
 async def cb_task(callback: CallbackQuery):
     if await consume_action_callback(callback) != "sect:task":
         return
-    await show(callback, _result_text(await sect.task(callback.from_user.id)), main_menu())
+    await show(callback, _result_text(await sect.task(callback.from_user.id)),
+               section_back_markup("↩️ 返回宗门", "nav:sect"))
     await callback.answer()
 
 
@@ -144,20 +156,15 @@ async def cb_task(callback: CallbackQuery):
 async def cb_upgrade(callback: CallbackQuery):
     if await consume_action_callback(callback) != "sect:upgrade":
         return
-    await show(callback, _result_text(await sect.upgrade(callback.from_user.id)), main_menu())
+    await show(callback, _result_text(await sect.upgrade(callback.from_user.id)),
+               section_back_markup("↩️ 返回宗门", "nav:sect"))
     await callback.answer()
 
 
 @router.callback_query(F.data == "sect:shop")
 async def cb_shop(callback: CallbackQuery):
-    rows = [
-        [InlineKeyboardButton(
-            text=f"{item_name(key)}（贡献 {good['contribution']}）",
-            callback_data=await action_callback_data(callback.from_user.id, f"sect:buy:{key}"))]
-        for key, good in SECT_SHOP.items()
-    ]
-    rows += main_menu().inline_keyboard
-    await show(callback, "🏪 宗门商店", InlineKeyboardMarkup(inline_keyboard=rows))
+    text, markup = await render_sect_shop(callback.from_user.id)
+    await show(callback, text, markup)
     await callback.answer()
 
 
@@ -167,5 +174,6 @@ async def cb_buy(callback: CallbackQuery):
     if not action or not action.startswith("sect:buy:"):
         return
     key = action.split(":", 2)[2]
-    await show(callback, _result_text(await sect.redeem(callback.from_user.id, key)), main_menu())
+    await show(callback, _result_text(await sect.redeem(callback.from_user.id, key)),
+               section_back_markup("↩️ 返回宗门商店", "sect:shop"))
     await callback.answer()

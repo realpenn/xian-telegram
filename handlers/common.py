@@ -103,13 +103,38 @@ def main_menu() -> InlineKeyboardMarkup:
     ])
 
 
+def main_menu_return_button(text: str = "🏯 返回主菜单") -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data="nav:menu")
+
+
+def append_main_menu_return(
+        rows: list[list[InlineKeyboardButton]],
+        text: str = "🏯 返回主菜单") -> list[list[InlineKeyboardButton]]:
+    rows.append([main_menu_return_button(text)])
+    return rows
+
+
+def main_menu_return_markup(text: str = "🏯 返回主菜单") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[main_menu_return_button(text)]])
+
+
+def section_back_markup(
+        text: str,
+        callback_data: str,
+        main_text: str = "🏯 主菜单") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=text, callback_data=callback_data),
+        InlineKeyboardButton(text=main_text, callback_data="nav:menu"),
+    ]])
+
+
 async def menu_with_breakthrough(user_id: int, can_advance: bool) -> InlineKeyboardMarkup:
     rows = []
     if can_advance:
         rows.append([InlineKeyboardButton(
             text="⚡ 尝试突破",
             callback_data=await action_callback_data(user_id, "bt:do"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

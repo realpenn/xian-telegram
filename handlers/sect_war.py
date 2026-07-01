@@ -6,8 +6,9 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import sect_war as CFG
-from handlers.common import (NEED_START, action_callback_data, consume_action_callback,
-                             guard_private_callback, guard_private_message, main_menu, show)
+from handlers.common import (NEED_START, action_callback_data, append_main_menu_return,
+                             consume_action_callback, guard_private_callback,
+                             guard_private_message, section_back_markup, show)
 from services import character, sect_war
 
 router = Router()
@@ -35,7 +36,7 @@ async def render_sect_war(user_id: int):
         rows.append([InlineKeyboardButton(
             text=f"争夺 {cfg['name']}",
             callback_data=await action_callback_data(user_id, f"sectwar:cap:{key}"))])
-    rows += main_menu().inline_keyboard
+    append_main_menu_return(rows)
     return "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -79,5 +80,5 @@ async def cb_sect_war_capture(callback: CallbackQuery):
     if not action or not action.startswith("sectwar:cap:"):
         return
     res = await sect_war.capture(callback.from_user.id, action.rsplit(":", 1)[1])
-    await show(callback, _result_text(res), main_menu())
+    await show(callback, _result_text(res), section_back_markup("↩️ 返回宗门战", "nav:sectwar"))
     await callback.answer()

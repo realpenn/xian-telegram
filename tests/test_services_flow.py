@@ -1,4 +1,5 @@
 import asyncio
+import random
 import time
 
 import pytest
@@ -110,6 +111,49 @@ async def test_concurrent_explore_spends_stamina_once(temp_db):
 
     assert statuses == ["pending", "started"]
     assert after.stamina == 0
+
+
+@pytest.mark.asyncio
+async def test_explore_uses_unbounded_player_mob_combat(temp_db, monkeypatch):
+    uid = 1111
+    await character.create(uid, "explorer")
+    seen = []
+
+    def fake_simulate(player, mob, **kwargs):
+        seen.append(kwargs.get("max_rounds"))
+        return {"winner": player, "log": ["⚔️ 道友 对阵 灵狐！", "🏆 道友 胜！"],
+                "a_hp": player.hp, "d_hp": 0, "rounds": 31, "reason": "defeat"}
+
+    monkeypatch.setattr(explore_service, "simulate", fake_simulate)
+
+    res = await explore_service._resolve(
+        uid, "后山", seed=1, now=1000, rng=random.Random(1),
+        n_enc=1, is_boss=False, finish_at=1000)
+
+    assert res["status"] == "ok"
+    assert res["win"] is True
+    assert seen == [None]
+
+
+@pytest.mark.asyncio
+async def test_dungeon_uses_unbounded_player_mob_combat(temp_db, monkeypatch):
+    uid = 1112
+    await character.create(uid, "delver")
+    seen = []
+
+    def fake_simulate(player, mob, **kwargs):
+        seen.append(kwargs.get("max_rounds"))
+        return {"winner": player, "log": ["⚔️ 道友 对阵 洞中灵狐！", "🏆 道友 胜！"],
+                "a_hp": player.hp, "d_hp": 0, "rounds": 31, "reason": "defeat"}
+
+    monkeypatch.setattr(dungeon_service, "simulate", fake_simulate)
+
+    res = await dungeon_service._resolve(
+        uid, "lingxi", seed=1, now=1000, rng=random.Random(1), finish_at=1000)
+
+    assert res["status"] == "ok"
+    assert res["win"] is True
+    assert seen and all(limit is None for limit in seen)
 
 
 def test_big_breakthrough_pills_drop_before_target_realm():

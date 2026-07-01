@@ -102,7 +102,7 @@ def winrate(realm: int, stage: int, mob_src: dict, profile=GEARED, n: int = 300)
     wins = 0
     for s in range(n):
         p = player(realm, stage, profile)
-        if simulate(p, _mob(mob_src), seed=s)["winner"] is p:
+        if simulate(p, _mob(mob_src), seed=s, max_rounds=None)["winner"] is p:
             wins += 1
     return wins / n
 
@@ -127,7 +127,9 @@ def map_run_winrate(realm: int, stage: int, map_key: str,
         p = player(realm, stage, profile)
         ok = True
         for _ in range(rng.randint(lo, hi)):
-            res = simulate(p, _mob(rng.choice(m["mobs"])), seed=rng.randint(1, 10_000_000))
+            res = simulate(
+                p, _mob(rng.choice(m["mobs"])),
+                seed=rng.randint(1, 10_000_000), max_rounds=None)
             if res["winner"] is not p:
                 ok = False
                 break
@@ -147,7 +149,9 @@ def dungeon_clear_fraction(realm: int, stage: int, dungeon_key: str,
         cleared = 0
         for layer in range(1, d["layers"] + 1):
             mob_src = d["boss"] if layer == d["layers"] else rng.choice(d["mobs"])
-            res = simulate(p, _mob(mob_src), seed=rng.randint(1, 10_000_000))
+            res = simulate(
+                p, _mob(mob_src),
+                seed=rng.randint(1, 10_000_000), max_rounds=None)
             if res["winner"] is not p:
                 break
             cleared += 1

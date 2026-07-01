@@ -53,7 +53,9 @@ async def capture(user_id: int, outpost_key: str, score: int = None, now: int = 
     player = Combatant(name="道友", hp=st["hp"], mp=st["mp"], atk=st["atk"],
                        df=st["df"], spd=st["spd"], crit=st["crit"],
                        skills=skills or ["普攻"], **mods)
-    result = simulate(player, _guard_combatant(outpost), seed=random.getrandbits(32))
+    result = simulate(
+        player, _guard_combatant(outpost),
+        seed=random.getrandbits(32), max_rounds=None)
     if result["winner"] is not player:
         return {"status": "defeated", "outpost": outpost["name"],
                 "guard": outpost["guard"]["name"]}

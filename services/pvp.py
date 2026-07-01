@@ -203,7 +203,7 @@ async def duel(attacker_id: int, defender_id: int = None, now: int = None,
 
     a = await _combatant(attacker_id, attacker_name)
     d = await _combatant(defender_id, defender_name)
-    result = simulate(a, d, seed=random.getrandbits(32))
+    result = simulate(a, d, seed=random.getrandbits(32), max_rounds=None)
     attacker_win = result["winner"] is a
 
     week = _week(now)

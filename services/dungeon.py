@@ -196,7 +196,9 @@ async def _resolve(user_id: int, dungeon_key: str, seed: int, now: int, rng=None
     defeat_reason = None
     for layer in range(1, d["layers"] + 1):
         mob_src = d["boss"] if layer == d["layers"] else rng.choice(d["mobs"])
-        result = simulate(player, _combatant(mob_src), seed=rng.randint(1, 10_000_000))
+        result = simulate(
+            player, _combatant(mob_src),
+            seed=rng.randint(1, 10_000_000), max_rounds=None)
         logs.append(f"第 {layer} 层：{mob_src['name']}，{'胜' if result['winner'] is player else '败'}")
         if result["winner"] is not player:
             defeat_reason = result.get("reason")

@@ -118,6 +118,28 @@ async def test_sect_outpost_capture_adds_buff_under_clamp(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_sect_war_capture_uses_unbounded_guard_combat(temp_db, monkeypatch):
+    uid = 9620
+    await character.create(uid, "blood-war")
+    await character.set_progress(uid, 4, 0, 0)
+    await character.add_stone(uid, 1000)
+    assert (await sect.create(uid, "血战宗", now=1000))["status"] == "ok"
+    seen = {}
+
+    def fake_simulate(player, guard, **kwargs):
+        seen.update(kwargs)
+        return {"winner": player, "log": ["⚔️ 道友 对阵 据点守卫！", "🏆 道友 胜！"],
+                "a_hp": player.hp, "d_hp": 0, "rounds": 31, "reason": "defeat"}
+
+    monkeypatch.setattr(sect_war, "simulate", fake_simulate)
+
+    res = await sect_war.capture(uid, "altar", now=WAR_OPEN)
+
+    assert res["status"] == "ok"
+    assert seen["max_rounds"] is None
+
+
+@pytest.mark.asyncio
 async def test_sect_war_closed_outside_window(temp_db):
     uid = 9613
     await character.create(uid, "closed")

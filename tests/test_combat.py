@@ -35,6 +35,17 @@ def test_rounds_capped_and_resolved():
     assert round_limit_label() in r["log"][-1]
 
 
+def test_unbounded_combat_runs_past_default_round_limit_to_defeat():
+    a = _mk("甲", hp=200, atk=6, df=300, spd=30, crit=0)
+    b = _mk("乙", hp=200, atk=6, df=300, spd=10, crit=0)
+
+    r = simulate(a, b, seed=3, max_rounds=None)
+
+    assert r["rounds"] > MAX_ROUNDS
+    assert r["winner"] in (a, b)
+    assert r["reason"] in ("defeat", "double_down")
+
+
 def test_skill_used_when_affordable():
     # 快剑斩 系数高，强者带技能应能赢且日志含技能名
     a = _mk("剑修", atk=200, skills=["快剑斩"])

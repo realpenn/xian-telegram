@@ -37,6 +37,44 @@ async def test_pvp_duel_updates_ratings_and_reward(temp_db):
 
 
 @pytest.mark.asyncio
+async def test_pvp_runs_past_round_limit_until_defeat(temp_db, monkeypatch):
+    a, b = 3231, 3232
+    await character.create(a, "attacker")
+    await character.create(b, "defender")
+
+    async def slow_combatant(user_id: int, name: str):
+        return pvp.Combatant(
+            name=name, hp=200, mp=100, atk=6, df=300,
+            spd=30 if user_id == a else 10, crit=0, skills=["普攻"])
+
+    seen = {}
+    original_simulate = pvp.simulate
+
+    def capture_simulate(*args, **kwargs):
+        seen.update(kwargs)
+        return original_simulate(*args, **kwargs)
+
+    monkeypatch.setattr(pvp, "_combatant", slow_combatant)
+    monkeypatch.setattr(pvp, "simulate", capture_simulate)
+
+    res = await pvp.duel(a, b, now=1000)
+    rows = await pvp.top()
+    daily = await db.fetchone("SELECT daily_count FROM pvp_ratings WHERE user_id=?", (a,))
+    pairs = await db.fetchall("SELECT * FROM pvp_daily_pairs")
+
+    assert res["status"] == "ok"
+    assert seen["max_rounds"] is None
+    assert res["rounds"] > 30
+    assert res["win"] in (True, False)
+    assert res["rating_delta"] != 0
+    assert res["reputation_gain"] in (pvp.WIN_REPUTATION, pvp.LOSS_REPUTATION)
+    assert any(row["wins"] == 1 for row in rows if row["user_id"] in (a, b))
+    assert any(row["losses"] == 1 for row in rows if row["user_id"] in (a, b))
+    assert daily["daily_count"] == 1
+    assert len(pairs) == 1
+
+
+@pytest.mark.asyncio
 async def test_pvp_same_opponent_counts_reputation_once_per_day(temp_db):
     a, b = 3201, 3202
     await character.create(a, "ace")

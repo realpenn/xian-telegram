@@ -11,11 +11,19 @@ from services import daily
 router = Router()
 
 
+def _ok_text(res: dict) -> str:
+    lines = [f"📅 签到成功，连续 {res['streak']} 日，灵石 +{res['stone']}。"]
+    for extra in res.get("extra_items", []):
+        if extra.get("item") == daily.HUASHEN_AID_ITEM:
+            lines.append("凝婴问道补给：化神丹 ×1（绑定）。")
+    return "\n".join(lines)
+
+
 @router.message(Command("daily"))
 async def cmd_daily(message: Message):
     res = await daily.checkin(message.from_user.id)
     if res["status"] == "ok":
-        await message.answer(f"📅 签到成功，连续 {res['streak']} 日，灵石 +{res['stone']}。")
+        await message.answer(_ok_text(res))
     elif res["status"] == "missing":
         await message.answer(NEED_START)
     else:

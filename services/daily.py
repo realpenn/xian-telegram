@@ -3,18 +3,51 @@ from __future__ import annotations
 
 import time
 
+from config import realms as R
 from models import db
+from services import character as character_service
+
+HUASHEN_AID_ITEM = "化神丹"
+YUANYING_REALM = 3
+HUASHEN_REALM = 4
 
 
 def _day(ts: int) -> str:
     return time.strftime("%Y-%m-%d", time.localtime(ts))
 
 
+async def _maybe_grant_huashen_aid_conn(conn, user_id: int, char) -> dict | None:
+    last_stage = R.num_stages(YUANYING_REALM) - 1
+    if char["realm"] != YUANYING_REALM or char["stage"] != last_stage:
+        return None
+    if char["cultivation"] < R.advance_cost(YUANYING_REALM, last_stage):
+        return None
+    cur = await conn.execute(
+        "SELECT 1 FROM tribulation_sessions WHERE user_id=? AND target_realm=?",
+        (user_id, HUASHEN_REALM))
+    active_tribulation = await cur.fetchone()
+    await cur.close()
+    if active_tribulation:
+        return None
+    if await character_service.item_qty_conn(conn, user_id, HUASHEN_AID_ITEM) > 0:
+        return None
+    await conn.execute(
+        "INSERT INTO inventory(user_id, item_key, bound, qty) VALUES(?,?,1,1) "
+        "ON CONFLICT(user_id, item_key, bound) DO UPDATE SET qty = qty + 1",
+        (user_id, HUASHEN_AID_ITEM))
+    return {
+        "item": HUASHEN_AID_ITEM,
+        "qty": 1,
+        "bound": 1,
+        "reason": "yuanying_full_aid",
+    }
+
+
 async def checkin(user_id: int, now: int = None) -> dict:
     now = int(time.time()) if now is None else now
     day = _day(now)
     async with db.transaction() as conn:
-        cur = await conn.execute("SELECT 1 FROM characters WHERE user_id=?", (user_id,))
+        cur = await conn.execute("SELECT * FROM characters WHERE user_id=?", (user_id,))
         char = await cur.fetchone()
         await cur.close()
         if not char:
@@ -33,4 +66,10 @@ async def checkin(user_id: int, now: int = None) -> dict:
         await conn.execute(
             "UPDATE characters SET spirit_stone = spirit_stone + ? WHERE user_id=?",
             (reward, user_id))
-        return {"status": "ok", "streak": streak, "stone": reward}
+        aid = await _maybe_grant_huashen_aid_conn(conn, user_id, char)
+        return {
+            "status": "ok",
+            "streak": streak,
+            "stone": reward,
+            "extra_items": [aid] if aid else [],
+        }
